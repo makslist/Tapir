@@ -12,6 +12,9 @@ execute ut.run('test_crud_update');
 prompt RUN DELETE TESTS
 execute ut.run('test_crud_delete');
 
+prompt RUN AUDIT COLUMNS TESTS
+execute ut.run('test_audit_columns');
+
 prompt RUN CLOUD_EVENT TESTS
 --execute ut.run('test_cloud_events');
 

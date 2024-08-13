@@ -18,27 +18,6 @@ create or replace package tapir authid current_user is
    *
    *  param tapi_name                     Substitution rule for the TAPI name based on the table name. '\1' stands for the captured table name.
    *                                      mapping('^(.*)$' => '\1$tapi') for table 'HR' leeds to TAPI name 'HR$tapi'
-   *        export_date_format            The date format used to print or compare date fields. If null the format of the session is used.
-   *        export_number_format 
-   *        logging_exception_procedure   If not null, occuring exceptions will be logged with this procedure
-   *        column_default_expressions    mapping('id' => 'seq_table_id') If defined, the expresion return value  will be assigned to the column when creating.
-   *        increase_row_version_column   Acts like a default expression, but modifiying the column based of the previous value. Type of column needs to be numerical.
-   *        exclude_column_when_writing   Columns which are ignored in writing api calls (insert, update). The columns need to be nullable or default values set on table level.
-   *                                      Columns which are part of the primary key are not allowed.
-   *        audit_user_exp                Define the expression to determine the user logged in the audit fields.
-   *        audit_col_created_by          If not null, the column is set to the value as defined with audit_user_exp
-   *        audit_col_created_date
-   *        audit_col_modified_by
-   *        audit_col_modified_date
-   *        for_update_timeout            The time in seconds until aquiring lock is canceled.
-   *        audit_ignore_when_comparing   
-   *        check_pk_values_before_select 
-   *        raise_error_on_failed_update_delete
-   *        use_column_defaults           If true, the defaults in the data dictionary are assigned to columns which are null. DB defaults won't be assigned directly, because the TAPI assigns null values to columns, when no set otherwise.
-   *        default_bulk_limit            The limit for the set based read operation.
-   *        use_result_cache
-   *        double_quote_names            If true, object names will be quoted.
-   *        create_occ_methods            Optimistic concurrency control
    *        proc_select
    *        proc_update
    *        proc_insert                   If not null, procedures are created to insert records (table%rowtype, table of rows).
@@ -54,41 +33,39 @@ create or replace package tapir authid current_user is
    *        proc_json_obj
    *        proc_of_json
    *        proc_checksum
-   *        proc_diff
+   *        proc_diff                     Is dependend of "proc_json_obj"
    *        proc_pipe
+   *        use_column_defaults           If true, the defaults in the data dictionary are assigned to columns which are null. DB defaults won't be assigned directly, because the TAPI assigns null values to columns, when no set otherwise.
+   *        check_pk_values_before_select 
+   *        raise_error_on_failed_update_delete
+   *        return_null_when_no_data_found
+   *        create_bulk_procedures
+   *        default_bulk_limit            The limit for the set based read operation.
+   *        create_occ_procedures         Optimistic concurrency control
    *        boolean_pseudo_type           Creates an aditional exists function returning a varchar2 instead of a boolean. For SQL for pre 23ai versions
-   *        tap_size
-   *        generate_test_proc
-   *        insert_custom_default_expressions   If not null, then all non excluded columns need an expression set
-   *        plsql_optimize_level
-   *        select_return_null_when_no_data_found
+   *        audit_user_exp                Define the expression to determine the user logged in the audit fields.
+   *        audit_col_created_by          If not null, the column is set to the value as defined with audit_user_exp
+   *        audit_col_created_date
+   *        audit_col_modified_by
+   *        audit_col_modified_date
+   *        audit_ignore_when_comparing   
+   *        export_date_format            The date format used to print or compare date fields. If null the format of the session is used.
+   *        export_number_format          If you omit 'nlsparam' or any one of the parameters, then this function uses the default parameter values for your session. 
+   *        logging_exception_procedure   If not null, occuring exceptions will be logged with this procedure
+   *        column_default_expressions    mapping('id' => 'seq_table_id') If defined, the expresion return value  will be assigned to the column when creating.
+   *        record_default_expressions    If not null, then all non excluded columns need an expression set
+   *        increase_row_version_column   Acts like a default expression, but modifiying the column based of the previous value. Type of column needs to be numerical.
+   *        exclude_column_when_writing   Columns which are ignored in writing api calls (insert, update). The columns need to be nullable or default values set on table level.
+   *                                      Columns which are part of the primary key are not allowed.
+   *        acquire_lock_timeout          The time in seconds until acquiring lock is canceled.
+   *        use_result_cache
+   *        double_quote_names            If true, object names will be quoted.
    *        parameter_prefix
    *        log_cloud_events
+   *        plsql_optimize_level
    */
    type params_t is record(
       tapi_name                             mapping default mapping('^(.*)$' => '\1$tapi'),
-      export_date_format                    obj_col default gc_date_format_iso_8601,
-      export_number_format                  obj_col default null,
-      logging_procedure                     obj_col default null,
-      logging_exception_procedure           obj_col default null,
-      column_default_expressions            mapping default mapping(),
-      custom_default_expressions            mapping default mapping(),
-      increase_row_version_column           obj_col default null,
-      exclude_column_when_writing           str_list default str_list(),
-      audit_user_exp                        varchar2(1024) default 'coalesce(sys_context(''apex$session'' ,''app_user'') ,sys_context(''userenv'' ,''os_user'') ,sys_context(''userenv'' ,''session_user''))',
-      audit_col_created_by                  obj_col default null,
-      audit_col_created_date                obj_col default null,
-      audit_col_modified_by                 obj_col default null,
-      audit_col_modified_date               obj_col default null,
-      for_update_timeout                    number not null default -1,
-      audit_ignore_when_comparing           boolean not null default true,
-      check_pk_values_before_select         boolean not null default true,
-      raise_error_on_failed_update_delete   boolean not null default true,
-      use_column_defaults                   boolean not null default true,
-      default_bulk_limit                    number not null default 1000,
-      use_result_cache                      boolean not null default false,
-      double_quote_names                    boolean not null default false,
-      create_occ_methods                    boolean not null default false,
       proc_select                           obj_col not null default 'sel',
       proc_update                           obj_col not null default 'upd',
       proc_insert                           obj_col not null default 'ins',
@@ -106,14 +83,34 @@ create or replace package tapir authid current_user is
       proc_checksum                         obj_col default 'checksum',
       proc_diff                             obj_col default 'diff',
       proc_pipe                             obj_col default 'pipe',
+      use_column_defaults                   boolean not null default true,
+      check_pk_values_before_select         boolean not null default true,
+      raise_error_on_failed_update_delete   boolean not null default true,
+      return_null_when_no_data_found        boolean not null default false,
+      create_bulk_procedures                boolean not null default true,
+      default_bulk_limit                    number not null default 1000,
+      create_occ_procedures                 boolean not null default false,
       boolean_pseudo_type                   mapping default mapping(),
-      tap_size                              pls_integer not null default 3,
-      generate_test_proc                    boolean not null default false,
-      plsql_optimize_level                  pls_integer default 2,
-      select_return_null_when_no_data_found boolean not null default false,
+      audit_user_exp                        varchar2(1024) default 'coalesce(sys_context(''apex$session'' ,''app_user'') ,sys_context(''userenv'' ,''os_user'') ,sys_context(''userenv'' ,''session_user''))',
+      audit_col_created_by                  obj_col default null,
+      audit_col_created_date                obj_col default null,
+      audit_col_modified_by                 obj_col default null,
+      audit_col_modified_date               obj_col default null,
+      audit_ignore_when_comparing           boolean not null default true,
+      export_date_format                    obj_col default gc_date_format_iso_8601, 
+      export_number_format                  obj_col default 'TM', 
+      logging_exception_procedure           obj_col default null,
+      column_default_expressions            mapping default mapping(),
+      record_default_expressions            mapping default mapping(),
+      increase_row_version_column           obj_col default null,
+      exclude_column_when_writing           str_list default str_list(),
+      acquire_lock_timeout                  number not null default -1,
+      use_result_cache                      boolean not null default false,
+      double_quote_names                    boolean not null default false,
       parameter_prefix                      obj_col default 'p_',
       log_cloud_events                      mapping not null default mapping('table_name'    => null,
-                                                                             'aq_queue_name' => null));
+                                                                             'aq_queue_name' => null),
+      plsql_optimize_level                  pls_integer default 2);
 
    function canonicalize_name
    (

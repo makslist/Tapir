@@ -24,13 +24,6 @@ create or replace package body tapir is
    c_type_rowid                          constant str := 'rowid';
    c_type_json_obj                       constant str := 'json_object_t';
 
-   supported_types constant str_list := str_list(c_type_varchar2,
-                                                 c_type_number,
-                                                 c_type_date,
-                                                 c_type_timestamp,
-                                                 c_type_blob,
-                                                 c_type_clob,
-                                                 c_type_rowid);
    scalar_types    constant str_list := str_list(c_type_varchar2,
                                                  c_type_number,
                                                  c_type_date,
@@ -66,12 +59,12 @@ create or replace package body tapir is
    nl           constant str := chr(10);
    nll          constant str := nl || nl;
 
-   tab     str := '   ';
-   nlt     str := nl || tab;
-   nltt    str := nlt || tab;
-   nlttt   str := nltt || tab;
-   nltttt  str := nlttt || tab;
-   nlttttt str := nltttt || tab;
+   tab    constant str := '    ';
+   nlt    constant str := nl || tab;
+   nltt    constant str := nlt || tab;
+   nlttt  constant str := nltt || tab;
+   nltttt constant str := nlttt || tab;
+   nlttttt constant str := nltttt || tab;
 
    tag_col             constant str := '<col_lower>';
    tag_col_pad         constant str := '<col_rpad>';
@@ -88,7 +81,7 @@ create or replace package body tapir is
    tag_col_default_2   constant str := '</default>';
    tag_col_to_char_1   constant str := '<to_char>';
    tag_col_to_char_2   constant str := '</to_char>';
-   tag_cust_default    constant str := '<custom_default>';
+   tag_rec_default     constant str := '<record_default>';
    tag_json_key        constant str := '<json_key>';
    tag_json_to_val_1   constant str := '<to_json_val>';
    tag_json_to_val_2   constant str := '</to_json_val>';
@@ -141,7 +134,7 @@ create or replace package body tapir is
 
    function doc_sel_no_data_found return str is
    begin
-      return case when params.select_return_null_when_no_data_found then nlt || ' * Returns NULL if no record was found.' else nlt || ' * Raises a no_data_found exception if no record was found.' end;
+      return case when params.return_null_when_no_data_found then nlt || ' * Returns NULL if no record was found.' else nlt || ' * Raises a no_data_found exception if no record was found.' end;
    end;
 
    function doc_sel_result_cache return str is
@@ -488,7 +481,7 @@ create or replace package body tapir is
          l_list(l_list.last) := replace(l_list(l_list.last),
                                         tag_json_key,
                                         lower(p_cols(idx).col_name) || case
-                                           when p_cols(idx).data_type member of str_list(c_type_clob, c_type_raw) then
+                                           when p_cols(idx).data_type member of binary_types then
                                             '_base64'
                                         end);
          l_list(l_list.last) := regexp_replace(l_list(l_list.last),
@@ -527,12 +520,12 @@ create or replace package body tapir is
          l_list(l_list.last) := regexp_replace(l_list(l_list.last),
                                                tag_col_default_1 || '(.*)' || tag_col_default_2,
                                                case
+                                                  when p_cols(idx).col_name = params.increase_row_version_column then
+                                                   'nvl(\1, 0) + 1'
                                                   when p_cols(idx).data_default is not null then
                                                    'nvl(\1, ' || trim(p_cols(idx).data_default) || ')'
                                                   when params.column_default_expressions.exists(p_cols(idx).col_name) then
                                                    params.column_default_expressions(p_cols(idx).col_name)
-                                                  when p_cols(idx).col_name = params.increase_row_version_column then
-                                                   'nvl(\1, 0) + 1'
                                                   when p_cols(idx).col_name member of g_audit_cols_date then
                                                    case p_cols(idx).data_type
                                                       when c_type_date then
@@ -545,16 +538,16 @@ create or replace package body tapir is
                                                   else
                                                    '\1'
                                                end);
-         if instr(l_list(l_list.last), tag_cust_default) > 0 and
-            not params.custom_default_expressions.exists(p_cols(idx).col_name) then
+         if instr(l_list(l_list.last), tag_rec_default) > 0 and
+            not params.record_default_expressions.exists(p_cols(idx).col_name) then
             raise_application_error(-20000,
                                     'Missing custom default expression for column ''' || p_cols(idx).col_name || '''');
          end if;
          l_list(l_list.last) := replace(l_list(l_list.last),
-                                        tag_cust_default,
+                                        tag_rec_default,
                                         case
-                                           when params.custom_default_expressions.exists(p_cols(idx).col_name) then
-                                            params.custom_default_expressions(p_cols(idx).col_name)
+                                           when params.record_default_expressions.exists(p_cols(idx).col_name) then
+                                            params.record_default_expressions(p_cols(idx).col_name)
                                         end);
          l_list(l_list.last) := regexp_replace(l_list(l_list.last),
                                                tag_col_to_char_1 || '(.*)' || tag_col_to_char_2,
@@ -604,9 +597,9 @@ create or replace package body tapir is
          l_list(l_list.last) := regexp_replace(l_list(l_list.last),
                                                tag_json_to_val_1 || '([^<]*)' || tag_json_to_val_2,
                                                case
-                                                  when p_cols(idx).data_type member of str_list(c_type_blob, c_type_raw) then
+                                                  when p_cols(idx).data_type member of binary_types then
                                                    'base64_encode(\1)'
-                                                  when p_cols(idx).data_type member of str_list(c_type_date, c_type_timestamp) then
+                                                  when p_cols(idx).data_type member of datetime_types then
                                                    'to_char(\1' || case
                                                       when params.export_date_format is not null then
                                                        ', ''' || params.export_date_format || ''''
@@ -828,7 +821,9 @@ create or replace package body tapir is
       ret_val   constant str := 'diff';
       bdy str;
    begin
-      if p_only_header then
+      if params.proc_diff is null or params.proc_json_obj is null then
+         return null; 
+      elsif p_only_header then
          return nll || doc || nlt || sig || ';';
       end if;
    
@@ -853,8 +848,8 @@ create or replace package body tapir is
       bdy := bdy || nlttt || 'return ' || ret_val || ';';
       bdy := bdy || nltt || 'else';
       bdy := bdy || nlttt || 'declare';
-      bdy := bdy || nltttt || 'jo_old   ' || c_type_json_obj || ' := json_obj(' || param_old || ');';
-      bdy := bdy || nltttt || 'jo_new   ' || c_type_json_obj || ':= json_obj(' || param_new || ');';
+      bdy := bdy || nltttt || 'jo_old   ' || c_type_json_obj || ' := ' || params.proc_json_obj || '(' || param_old || ');';
+      bdy := bdy || nltttt || 'jo_new   ' || c_type_json_obj || ':= ' || params.proc_json_obj || '(' || param_new || ');';
       bdy := bdy || nltttt || 'l_keys   json_key_list := jo_new.get_keys;';
       bdy := bdy || nlttt || 'begin';
       bdy := bdy || nltttt || ret_val || '.put(''mode'', ''update'');';
@@ -888,9 +883,12 @@ create or replace package body tapir is
       sig      constant str := prc_name || '(' || param || ' in ' || c_type_json_obj || ', p_forward in boolean)';
       bdy clob;
    begin
-      if p_only_header then
+      if params.proc_of_json is null then
+         return null;
+      elsif p_only_header then
          return null;
       end if;
+
       bdy := nll || tab || sig || ' is';
       bdy := bdy || nltt || l_rec || ' rt;';
       bdy := bdy || nltt || str_join(stringf(g_pk_cols, 'l_' || tag_col || ' ' || tag_type || ';'), nltt);
@@ -945,7 +943,9 @@ create or replace package body tapir is
       sig      constant str := prc_name || '(' || param || ' in ' || c_type_json_obj || ')';
       bdy str;
    begin
-      if p_only_header then
+      if params.proc_of_json is null then
+         return null;
+      elsif p_only_header then
          return nll || doc || nlt || sig || ';';
       end if;
    
@@ -964,7 +964,9 @@ create or replace package body tapir is
       sig      constant str := prc_name || '(' || param || ' in ' || c_type_json_obj || ')';
       bdy str;
    begin
-      if p_only_header then
+      if params.proc_of_json is null then
+         return null;
+      elsif p_only_header then
          return nll || doc || nlt || sig || ';';
       end if;
    
@@ -1071,7 +1073,7 @@ create or replace package body tapir is
       bdy := bdy || nlttt || 'return ' || l_row || ';';
       bdy := bdy || nltt || 'else';
       bdy := bdy || nlttt || case
-                when params.select_return_null_when_no_data_found then
+                when params.return_null_when_no_data_found then
                  l_row || ' := null;'
                 else
                  'raise no_data_found;'
@@ -1097,7 +1099,7 @@ create or replace package body tapir is
       cur_name  constant str := cursor_prefix || coalesce(p_suffix, cursor_suffix_pk) || occ_name_suffix;
       bdy str;
    begin
-      if not priv_to_dbms_crypto or not params.create_occ_methods then
+      if not priv_to_dbms_crypto or not params.create_occ_procedures then
          return null;
       elsif p_only_header then
          return nll || doc || nlt || sig || ';';
@@ -1285,7 +1287,7 @@ create or replace package body tapir is
                                                 nltt || '        or '));
       bdy := bdy || ')';
       bdy := bdy || nltt || 'returning ' || str_join(stringf(g_cols, col_quote('t.')), ', ') || ' into ' || param || ';';
-      if with_cloud_events then
+      if with_cloud_events and params.proc_json_obj is not null then
          bdy := bdy || nltt || proc_name_emit_cloud_event || '(''update'', $$plsql_unit, ' || params.proc_json_obj || '(' ||
                 param || '));';
       end if;
@@ -1303,7 +1305,7 @@ create or replace package body tapir is
       l_var    constant str := 'l_' || param_name_row;
       bdy str;
    begin
-      if not priv_to_dbms_crypto or not params.create_occ_methods then
+      if not priv_to_dbms_crypto or not params.create_occ_procedures then
          return null;
       elsif p_only_header then
          return nll || doc || nlt || sig || ';';
@@ -1377,7 +1379,7 @@ create or replace package body tapir is
       bdy := bdy || nltt || 'values';
       bdy := bdy || nlttt || '(' || str_join(stringf(changables, col_default(col_rec(param))), nlttt || ',') || ')';
       bdy := bdy || nltt || 'returning ' || str_join(stringf(g_cols, col_quote('t.')), ', ') || ' into ' || l_var || ';';
-      if with_cloud_events then
+      if with_cloud_events and params.proc_json_obj is not null then
          bdy := bdy || nltt || proc_name_emit_cloud_event || '(''insert'', $$plsql_unit, ' || params.proc_json_obj || '(' ||
                 l_var || '));';
       end if;
@@ -1411,12 +1413,12 @@ create or replace package body tapir is
       sig str;
       bdy str;
    begin
-      if params.custom_default_expressions.count = 0 then
+      if params.record_default_expressions.count = 0 then
          return null;
       end if;
    
       sig := prc_name || '(' ||
-             str_join(stringf(non_audit(changables), tag_col_pad || ' ' || tag_type || ' default ' || tag_cust_default),
+             str_join(stringf(non_audit(changables), tag_col_pad || ' ' || tag_type || ' default ' || tag_rec_default),
                       nlt || indent(prc_name) || ',') || ') return ' || type_rt_name;
       if p_only_header then
          return nll || doc || nlt || sig || ';';
@@ -1565,14 +1567,16 @@ create or replace package body tapir is
       sig      constant str := prc_name || '(' || param || ' in ' || type_rt_name || ') return ' || c_type_json_obj;
       bdy str;
    begin
-      if p_only_header then
+      if params.proc_json_obj is null then
+         return null;
+      elsif p_only_header then
          return nll || doc || nlt || sig || ';';
       end if;
    
       bdy := nll || tab || sig || ' is';
       bdy := bdy || nltt || 'jo ' || c_type_json_obj || ' := ' || c_type_json_obj || ';';
       bdy := bdy || nlt || 'begin';
-      bdy := bdy || nltt || str_join(stringf(include(g_cols, supported_types),
+      bdy := bdy || nltt || str_join(stringf(g_cols,
                                              'jo.put(''' || tag_json_key || ''', ' || col_json_val(col_rec(param)) || ');'),
                                      nltt);
       bdy := bdy || nltt || 'return jo;';
@@ -1597,7 +1601,7 @@ create or replace package body tapir is
       bdy := nll || tab || sig || ' is';
       bdy := bdy || nltt || param_name_row || ' ' || type_rt_name || ' := ' || type_rt_name || '();';
       bdy := bdy || nlt || 'begin';
-      bdy := bdy || nltt || str_join(stringf(include(g_cols, supported_types),
+      bdy := bdy || nltt || str_join(stringf(g_cols,
                                              col_rec(param_name_row) || ' := case' || nlttt || 'when (' || param ||
                                              '.has(''' || tag_json_key || ''') and not ' || param || '.get(''' ||
                                              tag_json_key || ''').is_null) then' || nltttt || tag_json_from_val_1 ||
@@ -1614,7 +1618,9 @@ create or replace package body tapir is
       sig      constant str := prc_name || '(' || param || ' in ' || type_rows_tab || ') return json_array_t';
       bdy str;
    begin
-      if p_only_header then
+      if params.proc_json_obj is null then
+         return null;
+      elsif p_only_header then
          return nll || doc || nlt || sig || ';';
       end if;
    
@@ -2064,7 +2070,7 @@ create or replace package body tapir is
       spc := nll || tab || decl || '(' ||
              str_join(stringf(g_cols, tag_rt_def || ' ' || tag_type), nlt || indent(decl) || ',') || ');';
    
-      if priv_to_dbms_crypto and params.create_occ_methods then
+      if priv_to_dbms_crypto and params.create_occ_procedures then
          decl := 'type ' || type_rt_name || occ_name_suffix || ' is record';
          spc  := spc || nll || tab || decl || '(' ||
                  str_join(stringf(g_cols, tag_rt_def || ' ' || tag_type), nlt || indent(decl) || ',');
@@ -2166,13 +2172,13 @@ create or replace package body tapir is
                          nltt || '   and ');
          spc := spc || case
                    when p_for_update then
-                    nltt || '   for update' || case params.for_update_timeout
+                    nltt || '   for update' || case params.acquire_lock_timeout
                        when -1 then
                         null
                        when 0 then
                         ' nowait'
                        else
-                        ' wait ' || params.for_update_timeout
+                        ' wait ' || params.acquire_lock_timeout
                     end
                 end;
          return spc || ';';
@@ -2190,7 +2196,7 @@ create or replace package body tapir is
                                            nlt || indent(cur_name) || ',') || ') return ' || type_rt_name_occ;
          spc str;
       begin
-         if not priv_to_dbms_crypto or not params.create_occ_methods then
+         if not priv_to_dbms_crypto or not params.create_occ_procedures then
             return null;
          elsif p_only_header then
             return sig || ';';
@@ -2505,24 +2511,20 @@ create or replace package body tapir is
       params.proc_select                 := sys.dbms_assert.simple_sql_name(params.proc_select);
       params.proc_update                 := sys.dbms_assert.simple_sql_name(params.proc_update);
       params.proc_insert                 := sys.dbms_assert.simple_sql_name(params.proc_insert);
-      params.proc_insert_cur             := sys.dbms_assert.simple_sql_name(params.proc_insert_cur);
+      params.proc_insert_cur             := case when params.proc_insert_cur is not null then sys.dbms_assert.simple_sql_name(params.proc_insert_cur) end;
       params.proc_delete                 := sys.dbms_assert.simple_sql_name(params.proc_delete);
-      params.proc_merge                  := sys.dbms_assert.simple_sql_name(params.proc_merge);
+      params.proc_merge                  := case when params.proc_merge is not null then sys.dbms_assert.simple_sql_name(params.proc_merge) end;
       params.proc_exists                 := sys.dbms_assert.simple_sql_name(params.proc_exists);
       params.proc_exists_and_select      := sys.dbms_assert.simple_sql_name(params.proc_exists_and_select);
-      params.proc_lock_record            := sys.dbms_assert.simple_sql_name(params.proc_lock_record);
-      params.proc_count                  := sys.dbms_assert.simple_sql_name(params.proc_count);
-      params.proc_print                  := sys.dbms_assert.simple_sql_name(params.proc_print);
-      params.proc_json_obj               := sys.dbms_assert.simple_sql_name(params.proc_json_obj);
-      params.proc_checksum               := sys.dbms_assert.simple_sql_name(params.proc_checksum);
-      params.proc_diff                   := sys.dbms_assert.simple_sql_name(params.proc_diff);
-      params.proc_pipe := case
-                             when params.proc_pipe is not null then
-                              sys.dbms_assert.simple_sql_name(params.proc_pipe)
-                             else
-                              null
-                          end;
-      params.parameter_prefix            := sys.dbms_assert.simple_sql_name(params.parameter_prefix);
+      params.proc_lock_record            := case when params.proc_lock_record is not null then sys.dbms_assert.simple_sql_name(params.proc_lock_record) end;
+      params.proc_count                  := case when params.proc_count is not null then sys.dbms_assert.simple_sql_name(params.proc_count) end;
+      params.proc_print                  := case when params.proc_print is not null then sys.dbms_assert.simple_sql_name(params.proc_print) end;
+      params.proc_json_obj               := case when params.proc_json_obj is not null then sys.dbms_assert.simple_sql_name(params.proc_json_obj) end;
+      params.proc_of_json                := case when params.proc_of_json is not null then sys.dbms_assert.simple_sql_name(params.proc_of_json) end;
+      params.proc_checksum               := case when params.proc_checksum is not null then sys.dbms_assert.simple_sql_name(params.proc_checksum) end;
+      params.proc_diff                   := case when params.proc_diff is not null then sys.dbms_assert.simple_sql_name(params.proc_diff) end;
+      params.proc_pipe                   := case when params.proc_pipe is not null then sys.dbms_assert.simple_sql_name(params.proc_pipe) end;
+      params.parameter_prefix            := case when params.parameter_prefix is not null then sys.dbms_assert.simple_sql_name(params.parameter_prefix) end;
       params.logging_exception_procedure := lower(params.logging_exception_procedure);
       if params.audit_user_exp is null then
          params.audit_col_created_by  := null;
@@ -2544,14 +2546,6 @@ create or replace package body tapir is
       g_audit_cols_modified := str_list(params.audit_col_modified_by, params.audit_col_modified_date);
       g_audit_cols_user     := str_list(params.audit_col_created_by, params.audit_col_modified_by);
       g_audit_cols_date     := str_list(params.audit_col_created_date, params.audit_col_modified_date);
-      if params.tap_size != length(tab) then
-         tab     := rpad(' ', params.tap_size, ' ');
-         nlt     := nl || tab;
-         nltt    := nlt || tab;
-         nlttt   := nltt || tab;
-         nltttt  := nlttt || tab;
-         nlttttt := nltttt || tab;
-      end if;
    end;
 
 begin
