@@ -61,7 +61,8 @@ create or replace package tapir authid current_user is
    *        use_result_cache
    *        double_quote_names            If true, object names will be quoted.
    *        parameter_prefix
-   *        log_cloud_events
+   *        log_cloud_events              The cloud_event functionality requires the presence of the JSON function. If it is not needed for the external API, a private function is created. 
+   *        warn_about_null_string_default Raises an exception, when encountering the string 'null' as default value       
    *        plsql_optimize_level
    */
    type params_t is record(
@@ -110,6 +111,7 @@ create or replace package tapir authid current_user is
       parameter_prefix                      obj_col default 'p_',
       log_cloud_events                      mapping not null default mapping('table_name'    => null,
                                                                              'aq_queue_name' => null),
+      warn_about_null_string_default        boolean default true,
       plsql_optimize_level                  pls_integer default 2);
 
    function canonicalize_name
@@ -170,13 +172,11 @@ create or replace package tapir authid current_user is
    *
    *  param p_table_name       The table the TAPI to generate for.
    *        p_schema_name      The schema of the source table. If null, the current schema will be used.
-   *        p_raise_on_error   Raise occuring an exception or return them as function result.
    */
    function tapi_source
    (
       p_table_name     in varchar2,
-      p_schema_name    in varchar2 default user,
-      p_raise_on_error boolean default true
+      p_schema_name    in varchar2 default user
    ) return clob;
 
    /**
@@ -184,13 +184,11 @@ create or replace package tapir authid current_user is
    *
    *  param p_table_name       The table the TAPI to generate for.
    *        p_schema_name      The schema of the source table. If null, the current schema will be used.
-   *        p_raise_on_error   Raise occuring an exception or return them as function result.
    */
    procedure compile_tapi
    (
       p_table_name     in varchar2,
-      p_schema_name    in varchar2 default user,
-      p_raise_on_error boolean default true
+      p_schema_name    in varchar2 default user
    );
 
    /**
