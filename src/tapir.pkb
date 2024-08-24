@@ -2405,7 +2405,8 @@ create or replace package body tapir is
    procedure create_ce_queue
    (
       p_queue_name  in varchar2,
-      p_schema_name in varchar2 default user
+      p_schema_name in varchar2 default user,
+      p_event_type  in varchar2 default null
    ) is
       l_type all_types.type_name%type;
    begin
@@ -2418,17 +2419,17 @@ create or replace package body tapir is
            into l_type
            from all_types t
           where t.owner = sys.dbms_assert.schema_name(p_schema_name)
-            and upper(t.type_name) = upper(type_cloud_event);
+            and upper(t.type_name) = upper(nvl(p_event_type, type_cloud_event));
       exception
          when no_data_found then
-            execute immediate 'create or replace type ' || p_schema_name || '.' || type_cloud_event ||
+            execute immediate 'create or replace type ' || p_schema_name || '.' || nvl(p_event_type, type_cloud_event) ||
                               ' authid definer as object' || '(' || 'ce_id raw(11),' || nl || 'ce_time timestamp,' || nl ||
                               'ce_type varchar2(100),' || nl || 'ce_source varchar2(200),' || nl || 'ce_data clob' || nl || ');';
       end;
    
       execute immediate 'begin' || nl || 'sys.dbms_aqadm.create_queue_table(queue_table => ''' || p_schema_name ||
                         '.'' || ' || nl || 'sys.dbms_assert.simple_sql_name(''' || p_queue_name || ''') || ''' ||
-                        ce_table_name_suffix || ''',' || nl || 'queue_payload_type => ''' || type_cloud_event ||
+                        ce_table_name_suffix || ''',' || nl || 'queue_payload_type => ''' || nvl(p_event_type, type_cloud_event) ||
                         ''',' || nl || 'sort_list => ''enq_time'',' || nl || 'multiple_consumers => true,' || nl ||
                         'compatible => ''10.0'',' || nl || 'comment => ''cloudevents from ' ||
                         upper($$plsql_unit) || ''');' || nl || 'end;';
@@ -2445,18 +2446,26 @@ create or replace package body tapir is
       p_schema_name in varchar2 default user,
       p_drop_type   in boolean default false
    ) is
+      l_type str;
    begin
       if not has_priv_for_sys_('DBMS_AQADM', p_schema_name) then
          raise_application_error(-20000, 'User ' || p_schema_name || ' is missing privileges to access DBMS_AQADM.');
       end if;
    
+      if p_drop_type then
+         select object_type
+           into l_type
+           from all_queue_tables
+          where owner = upper(p_schema_name)
+            and queue_table = upper(p_queue_name || '_tab');
+      end if;
       execute immediate 'begin' || nl || 'sys.dbms_aqadm.stop_queue(queue_name => sys.dbms_assert.schema_name(''' || p_schema_name || ''')'
                         || ' || ''.'' || ' || 'sys.dbms_assert.simple_sql_name(''' || p_queue_name || '''), wait => false);' || nl || 'end;';
       execute immediate 'begin' || nl || 'sys.dbms_aqadm.drop_queue(''' || p_schema_name || ''' || ''.'' || ''' || p_queue_name || ''');' || nl || 'end;';
       execute immediate 'begin' || nl || 'sys.dbms_aqadm.drop_queue_table(''' || p_schema_name || ''' || ''.'' || ''' || p_queue_name ||
                         ce_table_name_suffix || ''');' || nl || 'end;';
       if p_drop_type then
-         execute immediate 'drop type ' || p_schema_name || '.' || type_cloud_event;
+         execute immediate 'drop type ' || l_type;
       end if;
    end;
 

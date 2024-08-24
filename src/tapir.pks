@@ -147,7 +147,8 @@ create or replace package tapir authid current_user is
    procedure create_ce_queue
    (
       p_queue_name  in varchar2,
-      p_schema_name in varchar2 default user
+      p_schema_name in varchar2 default user,
+      p_event_type  in varchar2 default null
    );
 
    /**
