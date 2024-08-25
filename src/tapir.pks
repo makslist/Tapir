@@ -13,6 +13,16 @@ create or replace package tapir authid current_user is
    boolean_pseudo_yn constant mapping := mapping('true' => 'Y', 'false' => 'N');
    boolean_pseudo_10 constant mapping := mapping('true' => '1', 'false' => '0');
 
+   type audit_t is record (user_exp       varchar2(1024) default 'coalesce(sys_context(''apex$session'' ,''app_user'') ,sys_context(''userenv'' ,''os_user'') ,sys_context(''userenv'' ,''session_user''))',
+                           col_created_by     obj_col default null,
+                           col_created_date   obj_col default null,
+                           col_modified_by    obj_col default null,
+                           col_modified_date  obj_col default null,
+                           ignore_when_comparing boolean not null default true);
+   
+   type cloud_events_t is record(table_name    obj_col default null,
+                                 aq_queue_name obj_col default null);
+
    /**
    *  Parameter record to initialize the TAPI generator
    *
@@ -92,12 +102,7 @@ create or replace package tapir authid current_user is
       default_bulk_limit                    number not null default 1000,
       create_occ_procedures                 boolean not null default false,
       boolean_pseudo_type                   mapping default mapping(),
-      audit_user_exp                        varchar2(1024) default 'coalesce(sys_context(''apex$session'' ,''app_user'') ,sys_context(''userenv'' ,''os_user'') ,sys_context(''userenv'' ,''session_user''))',
-      audit_col_created_by                  obj_col default null,
-      audit_col_created_date                obj_col default null,
-      audit_col_modified_by                 obj_col default null,
-      audit_col_modified_date               obj_col default null,
-      audit_ignore_when_comparing           boolean not null default true,
+      audit                                 audit_t default audit_t(),
       export_date_format                    obj_col default gc_date_format_iso_8601, 
       export_number_format                  obj_col default 'TM', 
       logging_exception_procedure           obj_col default null,
@@ -109,8 +114,9 @@ create or replace package tapir authid current_user is
       use_result_cache                      boolean not null default false,
       double_quote_names                    boolean not null default false,
       parameter_prefix                      obj_col default 'p_',
-      log_cloud_events                      mapping not null default mapping('table_name'    => null,
-                                                                             'aq_queue_name' => null),
+      cloud_events                          cloud_events_t default cloud_events_t(),
+      -- log_cloud_events                      mapping not null default mapping('table_name'    => null,
+      --                                                                        'aq_queue_name' => null),
       warn_about_null_string_default        boolean default true,
       plsql_optimize_level                  pls_integer default 2);
 

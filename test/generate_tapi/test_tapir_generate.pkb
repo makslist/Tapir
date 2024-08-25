@@ -65,7 +65,7 @@ create or replace package body test_tapir_generate is
         l_source clob;
     begin
         tapir.init(tapir.params_t(tapi_name                  => tapir.mapping('^(.*)$' => 'test_tapir$default'),
-                                  audit_user_exp             => null,
+                                  audit                      => null,
                                   proc_pipe                  => null,
                                   create_bulk_procedures     => true,
                                   create_occ_procedures      => false,
@@ -86,7 +86,7 @@ create or replace package body test_tapir_generate is
     procedure test_tapi_compile_tapis is
     begin
         tapir.init(tapir.params_t(tapi_name                  => tapir.mapping('^(.*)$' => 'test_tapir$default'),
-                                  audit_user_exp             => null,
+                                  audit                      => null,
                                   proc_pipe                  => null,
                                   create_bulk_procedures     => true,
                                   create_occ_procedures      => false,
@@ -100,7 +100,7 @@ create or replace package body test_tapir_generate is
     procedure test_tapi_compile_crud is
     begin
         tapir.init(tapir.params_t(tapi_name                  => tapir.mapping('^(.*)$' => 'test_tapir$default'),
-                                  audit_user_exp             => null,
+                                  audit                      => null,
                                   proc_pipe                  => null,
                                   create_bulk_procedures     => true,
                                   create_occ_procedures      => false,
@@ -114,7 +114,7 @@ create or replace package body test_tapir_generate is
     procedure test_tapi_compile_row_version is
     begin
         tapir.init(tapir.params_t(tapi_name                  => tapir.mapping('^(.*)$' => 'test_tapir$row_version'),
-                                  audit_user_exp             => null,
+                                  audit                      => null,
                                   proc_pipe                  => null,
                                   create_bulk_procedures     => false,
                                   create_occ_procedures      => false,
@@ -128,7 +128,7 @@ create or replace package body test_tapir_generate is
     procedure test_tapi_compile_double_quoted_names is
     begin
         tapir.init(tapir.params_t(tapi_name                  => tapir.mapping('^(.*)$' => 'test_tapir$double_quote'),
-                                  audit_user_exp             => null,
+                                  audit                      => null,
                                   proc_pipe                  => null,
                                   create_bulk_procedures     => true,
                                   create_occ_procedures      => true,
@@ -142,7 +142,7 @@ create or replace package body test_tapir_generate is
     procedure test_tapi_compile_lock_timeout is
     begin
         tapir.init(tapir.params_t(tapi_name                  => tapir.mapping('^(.*)$' => 'test_tapir$lock_timeout'),
-                                  audit_user_exp             => null,
+                                  audit                      => null,
                                   proc_pipe                  => null,
                                   create_bulk_procedures     => true,
                                   create_occ_procedures      => true,
@@ -156,7 +156,7 @@ create or replace package body test_tapir_generate is
     procedure test_tapi_compile_lock_timeout_no_wait is
     begin
         tapir.init(tapir.params_t(tapi_name                  => tapir.mapping('^(.*)$' => 'test_tapir$lock_timeout_no_wait'),
-                                  audit_user_exp             => null,
+                                  audit                      => null,
                                   proc_pipe                  => null,
                                   create_bulk_procedures     => true,
                                   create_occ_procedures      => true,
@@ -170,7 +170,7 @@ create or replace package body test_tapir_generate is
     procedure test_tapi_compile_column_default_exp is
     begin
         tapir.init(tapir.params_t(tapi_name                  => tapir.mapping('^(.*)$' => 'test_tapir$column_default_exp'),
-                                  audit_user_exp             => null,
+                                  audit                      => null,
                                   proc_pipe                  => null,
                                   create_bulk_procedures     => true,
                                   create_occ_procedures      => true,
@@ -187,11 +187,11 @@ create or replace package body test_tapir_generate is
                                   proc_pipe                  => null,
                                   proc_json_obj              => null,
                                   proc_of_json               => null,
-                                  audit_user_exp              => '''me''',
-                                  audit_col_created_by        => 'created_by',
-                                  audit_col_created_date      => 'created_at',
-                                  audit_col_modified_by       => 'modified_by',
-                                  audit_col_modified_date     => 'modified_at',
+                                  audit                       => tapir.audit_t(user_exp          => '''me''',
+                                                                         col_created_by    => 'created_by',
+                                                                         col_created_date  => 'created_at',
+                                                                         col_modified_by   => 'modified_by',
+                                                                         col_modified_date => 'modified_at'),
                                   record_default_expressions => l_record_default_exp));
         tapir.compile_tapi(p_table_name => 'test_table_all_types');
     end;
@@ -202,12 +202,12 @@ create or replace package body test_tapir_generate is
                                   proc_pipe                  => null,
                                   proc_json_obj              => null,
                                   proc_of_json               => null,
-                                  audit_user_exp              => '''me''',
-                                  audit_col_created_by        => 'created_by',
-                                  audit_col_created_date      => 'created_at',
-                                  audit_col_modified_by       => 'modified_by',
-                                  audit_col_modified_date     => 'modified_at',
-                                  audit_ignore_when_comparing => true,
+                                  audit                       => tapir.audit_t(user_exp          => '''me''',
+                                                                         col_created_by    => 'created_by',
+                                                                         col_created_date  => 'created_at',
+                                                                         col_modified_by   => 'modified_by',
+                                                                         col_modified_date => 'modified_at',
+                                                                         ignore_when_comparing => true),
                                   record_default_expressions => l_record_default_exp));
         tapir.compile_tapi(p_table_name => 'test_table_all_types');
     end;
@@ -264,8 +264,6 @@ create or replace package body test_tapir_generate is
                                   record_default_expressions => l_record_default_exp));
         tapir.compile_tapi(p_table_name => 'test_table_all_types');
     end;
-
-    
 
     procedure test_tapi_compile_bulk is
     begin
@@ -342,22 +340,20 @@ create or replace package body test_tapir_generate is
 
     procedure test_tapi_compile_cloud_event_table_not_exists is
     begin
-        tapir.init(tapir.params_t(tapi_name                  => tapir.mapping('^(.*)$' => 'test_tapir$dummy'),
-                                  proc_pipe                  => null,
-                                  proc_json_obj              => null,
-                                  proc_of_json               => null,
-                                  log_cloud_events           => tapir.mapping('table_name'    => 'non_existing',
-                                                                              'aq_queue_name' => null)));
+        tapir.init(tapir.params_t(tapi_name        => tapir.mapping('^(.*)$' => 'test_tapir$dummy'),
+                                  proc_pipe        => null,
+                                  proc_json_obj    => null,
+                                  proc_of_json     => null,
+                                  cloud_events     => tapir.cloud_events_t(table_name => 'non_existing')));
     end;
 
     procedure test_tapi_compile_cloud_event_queue_not_exists is
     begin
-        tapir.init(tapir.params_t(tapi_name                  => tapir.mapping('^(.*)$' => 'test_tapir$dummy'),
-                                  proc_pipe                  => null,
-                                  proc_json_obj              => null,
-                                  proc_of_json               => null,
-                                  log_cloud_events           => tapir.mapping('table_name'    => null,
-                                                                              'aq_queue_name' => 'non_existing')));
+        tapir.init(tapir.params_t(tapi_name       => tapir.mapping('^(.*)$' => 'test_tapir$dummy'),
+                                  proc_pipe       => null,
+                                  proc_json_obj   => null,
+                                  proc_of_json    => null,
+                                  cloud_events    => tapir.cloud_events_t(aq_queue_name => 'non_existing')));
     end;
 
     procedure test_tapi_compile_cloud_event_table is
@@ -365,12 +361,11 @@ create or replace package body test_tapir_generate is
     begin
         tapir.create_ce_table(l_ce_table);
 
-        tapir.init(tapir.params_t(tapi_name                  => tapir.mapping('^(.*)$' => 'test_tapir$cloud_events_table'),
-                                  proc_pipe                  => null,
-                                  proc_json_obj              => null,
-                                  proc_of_json               => null,
-                                  log_cloud_events           => tapir.mapping('table_name'    => l_ce_table,
-                                                                              'aq_queue_name' => null)));
+        tapir.init(tapir.params_t(tapi_name       => tapir.mapping('^(.*)$' => 'test_tapir$cloud_events_table'),
+                                  proc_pipe       => null,
+                                  proc_json_obj   => null,
+                                  proc_of_json    => null,
+                                  cloud_events    => tapir.cloud_events_t(table_name => l_ce_table)));
         tapir.compile_tapi(p_table_name => 'test_table_all_types');
 
         execute immediate 'drop table ' || l_ce_table;
@@ -381,12 +376,11 @@ create or replace package body test_tapir_generate is
     begin
         tapir.create_ce_queue(l_ce_queue);
 
-        tapir.init(tapir.params_t(tapi_name                  => tapir.mapping('^(.*)$' => 'test_tapir$cloud_events_queue'),
-                                  proc_pipe                  => null,
-                                  proc_json_obj              => null,
-                                  proc_of_json               => null,
-                                  log_cloud_events           => tapir.mapping('table_name'    => null,
-                                                                              'aq_queue_name' => l_ce_queue)));
+        tapir.init(tapir.params_t(tapi_name       => tapir.mapping('^(.*)$' => 'test_tapir$cloud_events_queue'),
+                                  proc_pipe       => null,
+                                  proc_json_obj   => null,
+                                  proc_of_json    => null,
+                                  cloud_events    => tapir.cloud_events_t(aq_queue_name => l_ce_queue)));
         tapir.compile_tapi(p_table_name => 'test_table_all_types');
 
         tapir.drop_ce_queue(l_ce_queue);

@@ -110,7 +110,7 @@ create or replace package test_tapir_generate is
    procedure test_tapi_compile_col_default_null_string;
 
    --%test
-   --%throws(-1403)
+   --%throws(-20000)
    --%rollback(manual)
    procedure test_tapi_compile_cloud_event_table_not_exists;
 

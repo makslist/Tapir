@@ -36,6 +36,9 @@ create or replace package body tapir is
                                                  c_type_timestamp_with_time_zone,
                                                  c_type_interval_year_to_month,
                                                  c_type_interval_day_to_second);
+   timestamp_types  constant str_list := str_list(c_type_timestamp,
+                                                 c_type_timestamp_with_local_time_zone,
+                                                 c_type_timestamp_with_time_zone);
    number_types    constant str_list := str_list(c_type_number, c_type_float, c_type_binary_float, c_type_binary_double);
    lob_types       constant str_list := str_list(c_type_blob, c_type_clob, c_type_nclob);
    binary_types    constant str_list := str_list(c_type_blob, c_type_long, c_type_raw, c_type_long_raw);
@@ -385,7 +388,7 @@ create or replace package body tapir is
    begin
       for idx in 1 .. p_tab_cols.count loop
          if p_tab_cols(idx).col_name member of scalar_types
-            or (params.audit_ignore_when_comparing and p_tab_cols(idx).col_name member of g_audit_cols)
+            or (params.audit.ignore_when_comparing and p_tab_cols(idx).col_name member of g_audit_cols)
             or p_tab_cols(idx).data_type member of lob_types then
             null;
          else
@@ -534,7 +537,7 @@ create or replace package body tapir is
                                                        'systimestamp'
                                                    end
                                                   when p_cols(idx).col_name member of g_audit_cols_user then
-                                                   'nvl(\1, ' || params.audit_user_exp || ')'
+                                                   'nvl(\1, ' || params.audit.user_exp || ')'
                                                   else
                                                    '\1'
                                                end);
@@ -569,18 +572,20 @@ create or replace package body tapir is
          l_list(l_list.last) := regexp_replace(l_list(l_list.last),
                                                tag_json_from_val_1 || '([^<]*)' || tag_json_from_val_2,
                                                case
-                                                  when p_cols(idx).data_type = c_type_number then
+                                                  when p_cols(idx).data_type member of number_types then
                                                    '\1.get_number(''' || lower(p_cols(idx).col_name) || ''')'
                                                   when p_cols(idx).data_type = c_type_date then
                                                    '\1.get_date(''' || lower(p_cols(idx).col_name) || ''')'
-                                                  when p_cols(idx).data_type = c_type_timestamp then
+                                                  when p_cols(idx).data_type member of timestamp_types then
                                                    '\1.get_timestamp(''' || lower(p_cols(idx).col_name) || ''')'
                                                   when p_cols(idx).data_type = c_type_bool then
                                                    '\1.get_boolean(''' || lower(p_cols(idx).col_name) || ''')'
-                                                  when p_cols(idx).data_type = c_type_clob then
+                                                  when p_cols(idx).data_type member of str_list(c_type_clob, c_type_nclob) then
                                                    '\1.get_clob(''' || lower(p_cols(idx).col_name) || ''')'
                                                   when p_cols(idx).data_type = c_type_blob then
                                                    'base64_decode(\1.get_clob(''' || lower(p_cols(idx).col_name) || '_base64' || '''))'
+                                                  when p_cols(idx).data_type = c_type_raw then
+                                                   'base64_decode(\1.get_string(''' || lower(p_cols(idx).col_name) || '_base64' || '''))'
                                                   else
                                                    '\1.get_string(''' || lower(p_cols(idx).col_name) || ''')'
                                                end);
@@ -773,8 +778,8 @@ create or replace package body tapir is
       bdy := bdy || nltt || 'end;';
       bdy := bdy || nlt || 'begin';
       bdy := bdy || nltt || 'l_ce_id := snowflake_id;';
-      if params.log_cloud_events.exists('table_name') and params.log_cloud_events('table_name') is not null then
-         bdy := bdy || nltt || 'insert into ' || params.log_cloud_events('table_name');
+      if params.cloud_events.table_name is not null then
+         bdy := bdy || nltt || 'insert into ' || params.cloud_events.table_name;
          bdy := bdy || nlttt || '(ce_id';
          bdy := bdy || nlttt || ',ce_time';
          bdy := bdy || nlttt || ',ce_type';
@@ -788,10 +793,10 @@ create or replace package body tapir is
          bdy := bdy || nlttt || ',p_data.to_string);';
       end if;
    
-      if priv_to_dbms_aqadm and params.log_cloud_events.exists('aq_queue_name') and params.log_cloud_events('aq_queue_name') is not null then
+      if priv_to_dbms_aqadm and params.cloud_events.aq_queue_name is not null then
          bdy := bdy || nl;
          bdy := bdy || nltt || 'sys.dbms_aq.enqueue(queue_name         => ''' ||
-                params.log_cloud_events('aq_queue_name') || '''';
+                params.cloud_events.aq_queue_name || '''';
          bdy := bdy || nlttt || ',enqueue_options    => sys.dbms_aq.enqueue_options_t()';
          bdy := bdy || nlttt || ',message_properties => sys.dbms_aq.message_properties_t(';
          bdy := bdy || nltttt || 'recipient_list => sys.dbms_aq.aq$_recipient_list_t(';
@@ -2063,7 +2068,7 @@ create or replace package body tapir is
              str_join(stringf(g_cols,
                               'subtype ' || tag_col || type_name_suffix || ' is ' || tag_type || tag_not_null || ';'),
                       nlt);
-      return spc || nlt || 'subtype ' || type_col_hash || ' is varchar2(64);';
+      return spc || nlt || 'subtype ' || type_col_hash || ' is varchar2(128);';
    end;
 
    function tapi_record_rt return clob is
@@ -2213,7 +2218,7 @@ create or replace package body tapir is
                 str_join(stringf(p_cols_tab,
                                  col_quote('t.') || ' = nvl(' || tag_param || ', ' || col_quote('t.') || ')'),
                          nltt || '   and ');
-         return spc || nltt || '   for update nowait;';
+         return spc || ';';
       end;
    begin
       for idx in 1 .. g_cons.count loop
@@ -2492,29 +2497,29 @@ create or replace package body tapir is
       params.proc_pipe                   := case when params.proc_pipe is not null then sys.dbms_assert.simple_sql_name(params.proc_pipe) end;
       params.parameter_prefix            := case when params.parameter_prefix is not null then sys.dbms_assert.simple_sql_name(params.parameter_prefix) end;
       params.logging_exception_procedure := lower(params.logging_exception_procedure);
-      if params.audit_user_exp is null then
-         params.audit_col_created_by  := null;
-         params.audit_col_modified_by := null;
+      if params.audit.user_exp is null then
+         params.audit.col_created_by  := null;
+         params.audit.col_modified_by := null;
       end if;
    
       if not params.double_quote_names then
-         params.audit_col_created_by    := upper(params.audit_col_created_by);
-         params.audit_col_modified_by   := upper(params.audit_col_modified_by);
-         params.audit_col_created_date  := upper(params.audit_col_created_date);
-         params.audit_col_modified_date := upper(params.audit_col_modified_date);
+         params.audit.col_created_by    := upper(params.audit.col_created_by);
+         params.audit.col_modified_by   := upper(params.audit.col_modified_by);
+         params.audit.col_created_date  := upper(params.audit.col_created_date);
+         params.audit.col_modified_date := upper(params.audit.col_modified_date);
       end if;
    
-      g_audit_cols          := str_list(params.audit_col_created_by,
-                                        params.audit_col_modified_by,
-                                        params.audit_col_created_date,
-                                        params.audit_col_modified_date);
-      g_audit_cols_created  := str_list(params.audit_col_created_by, params.audit_col_created_date);
-      g_audit_cols_modified := str_list(params.audit_col_modified_by, params.audit_col_modified_date);
-      g_audit_cols_user     := str_list(params.audit_col_created_by, params.audit_col_modified_by);
-      g_audit_cols_date     := str_list(params.audit_col_created_date, params.audit_col_modified_date);
+      g_audit_cols          := str_list(params.audit.col_created_by,
+                                        params.audit.col_modified_by,
+                                        params.audit.col_created_date,
+                                        params.audit.col_modified_date);
+      g_audit_cols_created  := str_list(params.audit.col_created_by, params.audit.col_created_date);
+      g_audit_cols_modified := str_list(params.audit.col_modified_by, params.audit.col_modified_date);
+      g_audit_cols_user     := str_list(params.audit.col_created_by, params.audit.col_modified_by);
+      g_audit_cols_date     := str_list(params.audit.col_created_date, params.audit.col_modified_date);
 
       with_cloud_events := false;
-      if params.log_cloud_events.exists('aq_queue_name') and params.log_cloud_events('aq_queue_name') is not null then
+      if params.cloud_events.aq_queue_name is not null then
          declare
             l_priv all_queues.owner%type;
          begin
@@ -2525,17 +2530,17 @@ create or replace package body tapir is
                                              and q.name = p.table_name
                                              and p.grantee = g_owner
                                              and p.privilege = 'ENQUEUE'
-             where q.name = upper(params.log_cloud_events('aq_queue_name'))
+             where q.name = upper(params.cloud_events.aq_queue_name)
                and nvl(p.grantee, q.owner) = upper(g_owner);
             with_cloud_events := true;
          exception
             when no_data_found then
                raise_application_error(-20000,
-                                       'Queue ''' || params.log_cloud_events('aq_queue_name') ||
+                                       'Queue ''' || params.cloud_events.aq_queue_name ||
                                        ''' not found or no privlege to enqueue granted.');
          end;
       end if;
-      if params.log_cloud_events.exists('table_name') and params.log_cloud_events('table_name') is not null then
+      if params.cloud_events.table_name is not null then
          declare
             l_priv all_tables.owner%type;
          begin
@@ -2545,13 +2550,13 @@ create or replace package body tapir is
               left outer join all_tab_privs p on t.owner = p.table_schema
                                              and t.table_name = p.table_name
                                              and p.privilege = 'INSERT'
-             where t.table_name = upper(params.log_cloud_events('table_name'))
+             where t.table_name = upper(params.cloud_events.table_name)
                and nvl(p.grantee, t.owner) = upper(g_owner);
             with_cloud_events := true;
          exception
             when no_data_found then
                raise_application_error(-20000,
-                                       'Table ''' || params.log_cloud_events('tab_name') ||
+                                       'Table ''' || params.cloud_events.table_name ||
                                        ''' not found or no privlege to insert granted.');
          end;
       end if;
