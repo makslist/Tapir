@@ -62,7 +62,6 @@ create table if not exists test_table_no_pk(
    no_pk                            number not null
 )
 /
-
 drop table if exists test_table_edge_case;
 /
 create table if not exists test_table_edge_case(
@@ -74,4 +73,43 @@ create table if not exists test_table_edge_case(
    check (number_t in (1, 0)),
    constraint test_table_edge_case_pk primary key(pk) using index
 )
+/
+drop table if exists test_table;
+/
+create table if not exists test_table(
+   pk                               number not null,
+   identity_column                  int generated always as identity,
+   varchar2_t                       varchar2(100),
+   char_t                           char,
+   nchar_t                          nchar,
+   nvarchar2_t                      nvarchar2(100),
+   number_t                         number not null,
+   float_t                          float,
+   binary_float_t                   binary_float,
+   binary_double_t                  binary_double,
+   date_t                           date default sysdate,
+   timestamp_t                      timestamp,
+   timestamp_with_local_time_zone_t timestamp with local time zone,
+   timestamp_with_time_zone_t       timestamp with time zone,
+   interval_year_to_month_t         interval year to month,
+   interval_day_to_second_t         interval day to second,
+   blob_t                           blob,
+   clob_t                           clob,
+   nclob_t                          nclob,
+   --long_t                           long,
+   raw_t                            raw(64),
+   --long_raw_t                       long raw,
+   bool_t                           boolean,
+   --rowid_t                          rowid,
+   virtual_col                      integer generated always as (number_t * 2) virtual,
+   created_by                       varchar2(100),
+   created_at                       date,
+   modified_by                      varchar2(100),
+   modified_at                      timestamp,
+   constraint test_table_pk primary key(pk) using index
+)
+/
+create unique index if not exists test_table_unique_col on test_table(varchar2_t)
+/
+create index if not exists test_table_col_idx on test_table(number_t)
 /

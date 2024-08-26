@@ -1,6 +1,6 @@
 create or replace package test_tapi authid definer is
 
-   --%suite('test_tapi')
+   --%suite('test_table$tapi')
    --%suitepath(tapi.globaltests)
 
    --%test
@@ -30,6 +30,9 @@ create or replace package test_tapi authid definer is
    procedure test_exists;
 
    --%test
+   procedure test_counts;
+
+   --%test
    procedure test_exists_select;
 
    --%test
@@ -40,11 +43,22 @@ create or replace package test_tapi authid definer is
    procedure test_select_no_data_found;
 
    --%test
+   --%throws(-1403)
+   procedure test_select_unique_col_no_data_found;
+
+   --%test
    procedure test_select_for_update;
 
    --%test
    --%throws(-1403)
    procedure test_select_for_update_no_data_found;
+
+   --%test
+   procedure test_select_unique_col_for_update;
+
+   --%test
+   --%throws(-1403)
+   procedure test_select_unique_col_for_update_no_data_found;
 
    --%test
    procedure test_select_rows;
@@ -62,8 +76,15 @@ create or replace package test_tapi authid definer is
    procedure test_delete;
 
    --%test
+   procedure test_delete_unique_col;
+
+   --%test
    --%throws(-1403)
    procedure test_delete_no_data_found;
+
+   --%test
+   --%throws(-1403)
+   procedure test_delete_unique_col_no_data_found;
 
    --%test
    procedure test_audit_insert;
@@ -107,7 +128,19 @@ create or replace package test_tapi authid definer is
    procedure test_of_json;
 
    --%test
+   procedure test_to_json_array;
+
+   --%test
    procedure test_diff;
+
+   --%test
+   procedure test_diff_null_objects;
+
+   --%test
+   procedure test_diff_undo;
+
+   --%test
+   --procedure test_diff_redo;
 
 end;
 /

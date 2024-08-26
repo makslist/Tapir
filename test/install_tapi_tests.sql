@@ -2,11 +2,11 @@ set serveroutput on
 
 prompt GENERATE CRUD TAPI
 begin
-   tapir.init(tapir.params_t(tapi_name                  => tapir.mapping('^(.*)$' => 'tapir_all_types$crud'),
+   tapir.init(tapir.params_t(tapi_name                  => tapir.mapping('^(.*)$' => '\1$tapi'),
                              proc_pipe                  => null,
                              create_bulk_procedures     => true,
                              create_occ_procedures      => true,
-                                  audit                       => tapir.audit_t(user_exp          => '''me''',
+                             audit                      => tapir.audit_t(user_exp          => '''me''',
                                                                          col_created_by    => 'created_by',
                                                                          col_created_date  => 'created_at',
                                                                          col_modified_by   => 'modified_by',
@@ -32,6 +32,6 @@ begin
                                                                          'RAW_T'                            => 'utl_raw.cast_to_raw(''raw'')',
                                                                          'BOOL_T'                           => 'true',
                                                                          'ROWID_T'                          => '''1''')));
-   tapir.compile_tapi(p_table_name => 'test_table_all_types');
+   tapir.compile_tapi(p_table_name => 'test_table');
 end;
 /

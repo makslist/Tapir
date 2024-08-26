@@ -10,5 +10,5 @@ spool off
 
 prompt RUN TAPI TEST CODE COVERAGE
 spool tapi_coverage.html
-execute ut.run(ut_coverage_html_reporter(), a_include_object_expr => 'tapir_all_types');
+execute ut.run(ut_coverage_html_reporter(), a_include_object_expr => 'test_table');
 spool off
