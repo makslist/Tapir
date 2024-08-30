@@ -35,6 +35,7 @@ create unique index if not exists test_table_all_types_varchar2_t_unique on test
 /
 create index if not exists test_table_all_types_number_t_idx on test_table_all_types(number_t)
 /
+
 drop table if exists test_table_non_lob_types;
 /
 create table if not exists test_table_non_lob_types(
@@ -56,6 +57,7 @@ create table if not exists test_table_non_lob_types(
    unique (no_pk) using index
 )
 /
+
 drop table if exists test_table_no_pk;
 /
 create table if not exists test_table_no_pk(
@@ -74,6 +76,12 @@ create table if not exists test_table_edge_case(
    constraint test_table_edge_case_pk primary key(pk) using index
 )
 /
+
+@test_tapir_generate.pks
+/
+@test_tapir_generate.pkb
+/
+
 drop table if exists test_table;
 /
 create table if not exists test_table(
@@ -112,4 +120,46 @@ create table if not exists test_table(
 create unique index if not exists test_table_unique_col on test_table(varchar2_t)
 /
 create index if not exists test_table_col_idx on test_table(number_t)
+/
+
+prompt GENERATE TEST TAPI PACKAGE
+declare
+    init_values tapir.mapping := tapir.mapping('VARCHAR2_T'                       => 'sys.dbms_random.string(''L'', round(sys.dbms_random.value(1, 100)))',
+                                               'CHAR_T'                           => 'sys.dbms_random.string(''L'', 1)',
+                                               'NCHAR_T'                          => 'sys.dbms_random.string(''L'', 1)',
+                                               'NVARCHAR2_T'                      => 'sys.dbms_random.string(''L'', round(sys.dbms_random.value(1, 100)))',
+                                               'NUMBER_T'                         => 'round(sys.dbms_random.value(1, 1024 * 1024))',
+                                               'FLOAT_T'                          => 'to_number(2)',
+                                               'BINARY_FLOAT_T'                   => 'round(sys.dbms_random.value(1, 1024 * 1024))',
+                                               'BINARY_DOUBLE_T'                  => 'round(sys.dbms_random.value(1, 1024 * 1024))',
+                                               'DATE_T'                           => 'sysdate',
+                                               'TIMESTAMP_T'                      => 'systimestamp',
+                                               'TIMESTAMP_WITH_LOCAL_TIME_ZONE_T' => 'systimestamp',
+                                               'TIMESTAMP_WITH_TIME_ZONE_T'       => 'systimestamp',
+                                               'INTERVAL_YEAR_TO_MONTH_T'         => '(systimestamp - to_date(''2024'', ''YYYY'')) year(9) to month',
+                                               'INTERVAL_DAY_TO_SECOND_T'         => '(systimestamp - to_date(''2024'', ''YYYY'')) day(9) to second',
+                                               'BLOB_T'                           => 'utl_raw.cast_to_raw(''blob'')',
+                                               'CLOB_T'                           => 'substr(sys_guid(), 1, 20)',
+                                               'NCLOB_T'                          => 'substr(sys_guid(), 1, 20)',
+                                               'RAW_T'                            => 'utl_raw.cast_to_raw(''raw'')',
+                                               'BOOL_T'                           => 'true',
+                                               'ROWID_T'                          => '''1''');
+begin
+    tapir.init(tapir.params_t(tapi_name                           => tapir.mapping('^(.*)$' => '\1$tapi'),
+                              proc_pipe                           => null,
+                              create_occ_procedures               => true,
+                              raise_error_on_failed_update_delete => true,
+                              audit                               => tapir.audit_t(user_exp              => '''me''',
+                                                                                   col_created_by        => 'created_by',
+                                                                                   col_created_date      => 'created_at',
+                                                                                   col_modified_by       => 'modified_by',
+                                                                                   col_modified_date     => 'modified_at',
+                                                                                   ignore_when_comparing => true),
+                              defaults                            => tapir.defaults_t(init_record_expressions => init_values)));
+    tapir.compile_tapi(p_table_name => 'test_table');
+end;
+/
+@test_tapi.pks
+/
+@test_tapi.pkb
 /
