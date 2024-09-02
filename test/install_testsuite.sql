@@ -144,18 +144,30 @@ declare
                                                'RAW_T'                            => 'utl_raw.cast_to_raw(''raw'')',
                                                'BOOL_T'                           => 'true',
                                                'ROWID_T'                          => '''1''');
+   l_queue_name  varchar2(100) := 'tapi_aq';
+   l_event_type  varchar2(100) := 'tapi_cloud_event';
+   l_ce_tab_name varchar2(100) := 'tapi_ce_tab';
 begin
-    tapir.init(tapir.params_t(tapi_name                           => tapir.mapping('^(.*)$' => '\1$tapi'),
-                              proc_pipe                           => null,
-                              create_occ_procedures               => true,
-                              raise_error_on_failed_update_delete => true,
-                              audit                               => tapir.audit_t(user_exp              => '''me''',
-                                                                                   col_created_by        => 'created_by',
-                                                                                   col_created_date      => 'created_at',
-                                                                                   col_modified_by       => 'modified_by',
-                                                                                   col_modified_date     => 'modified_at',
-                                                                                   ignore_when_comparing => true),
-                              defaults                            => tapir.defaults_t(init_record_expressions => init_values)));
+   execute immediate 'drop table if exists ' || l_ce_tab_name;
+   tapir.create_ce_table(l_ce_tab_name, user, true, 16);
+
+   tapir.drop_ce_queue(p_queue_name => l_queue_name, p_drop_type => true);
+   tapir.create_ce_queue(p_queue_name => l_queue_name,
+                         p_event_type => l_event_type);
+
+   tapir.init(tapir.params_t(tapi_name                           => tapir.mapping('^(.*)$' => '\1$tapi'),
+                             proc_pipe                           => null,
+                             create_occ_procedures               => true,
+                             raise_error_on_failed_update_delete => true,
+                             audit                               => tapir.audit_t(user_exp              => '''me''',
+                                                                                  col_created_by        => 'created_by',
+                                                                                  col_created_date      => 'created_at',
+                                                                                  col_modified_by       => 'modified_by',
+                                                                                  col_modified_date     => 'modified_at',
+                                                                                  ignore_when_comparing => true),
+                             defaults                            => tapir.defaults_t(init_record_expressions => init_values),
+                             cloud_events                        => tapir.cloud_events_t(table_name     => l_ce_tab_name,
+                                                                                         aq_queue_name  => l_queue_name)));
     tapir.compile_tapi(p_table_name => 'test_table');
 end;
 /

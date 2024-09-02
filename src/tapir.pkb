@@ -768,6 +768,7 @@ create or replace package body tapir is
         end if;
         bdy := nll || sig || ' is';
         bdy := bdy || nltt || 'l_ce_id integer;';
+        bdy := bdy || nltt || 'l_data clob;';
         bdy := bdy || nltt || 'l_message_id raw(16);';
         bdy := bdy || nltt || 'function snowflake_id return integer is';
         bdy := bdy || nlttt || 'b10         integer := 1023;';
@@ -790,6 +791,8 @@ create or replace package body tapir is
         bdy := bdy || nltt || 'end;';
         bdy := bdy || nlt || 'begin';
         bdy := bdy || nltt || 'l_ce_id := snowflake_id;';
+        bdy := bdy || nltt || 'l_data := p_data.to_string;';
+
         if params.cloud_events.table_name is not null then
             bdy := bdy || nltt || 'insert into ' || params.cloud_events.table_name;
             bdy := bdy || nlttt || '(ce_id';
@@ -799,23 +802,34 @@ create or replace package body tapir is
             bdy := bdy || nlttt || ',ce_data)';
             bdy := bdy || nltt || 'values';
             bdy := bdy || nlttt || '(utl_raw.cast_from_number(l_ce_id)';
-            bdy := bdy || nlttt || ',to_char(sys_extract_utc(systimestamp), ''' || gc_date_format_iso_8601 || ''')';
+            bdy := bdy || nlttt || ',sys_extract_utc(systimestamp)';
             bdy := bdy || nlttt || ',p_type';
             bdy := bdy || nlttt || ',p_source';
-            bdy := bdy || nlttt || ',p_data.to_string);';
+            bdy := bdy || nlttt || ',l_data);';
         end if;
     
         if priv_to_dbms_aqadm and params.cloud_events.aq_queue_name is not null then
-            bdy := bdy || nl;
-            bdy := bdy || nltt || 'sys.dbms_aq.enqueue(queue_name         => ''' || params.cloud_events.aq_queue_name || '''';
-            bdy := bdy || nlttt || ',enqueue_options    => sys.dbms_aq.enqueue_options_t()';
-            bdy := bdy || nlttt || ',message_properties => sys.dbms_aq.message_properties_t(';
-            bdy := bdy || nltttt || 'recipient_list => sys.dbms_aq.aq$_recipient_list_t(';
-            bdy := bdy || nlttttt || '1 => sys.aq$_agent(''CONSUMER'', null, 0)))';
-            bdy := bdy || nlttt || ',payload            => ' || type_cloud_event || '(' ||
-                   'utl_raw.cast_from_number(l_ce_id)' || ', sys_extract_utc(systimestamp)' || ', p_type' ||
-                   ', p_source' || ', p_data.to_string' || ')';
-            bdy := bdy || nlttt || ',msgid              => l_message_id);';
+            declare
+                l_type obj_col;
+            begin
+                select t.data_type
+                  into l_type
+                  from all_tab_cols t
+                 where t.owner = upper(user)
+                       and t.table_name = upper(sys.dbms_assert.simple_sql_name(params.cloud_events.aq_queue_name) || ce_table_name_suffix)
+                       and t.column_name = 'USER_DATA';
+
+                bdy := bdy || nl;
+                bdy := bdy || nltt || 'sys.dbms_aq.enqueue(queue_name         => ''' || params.cloud_events.aq_queue_name || '''';
+                bdy := bdy || nlttt || ',enqueue_options    => sys.dbms_aq.enqueue_options_t()';
+                bdy := bdy || nlttt || ',message_properties => sys.dbms_aq.message_properties_t(';
+                bdy := bdy || nltttt || 'recipient_list => sys.dbms_aq.aq$_recipient_list_t(';
+                bdy := bdy || nlttttt || '1 => sys.aq$_agent(''CONSUMER'', null, 0)))';
+                bdy := bdy || nlttt || ',payload            => ' || lower(l_type) || '(' ||
+                       'utl_raw.cast_from_number(l_ce_id)' || ', sys_extract_utc(systimestamp)' || ', p_type' ||
+                       ', p_source' || ', l_data' || ')';
+                bdy := bdy || nlttt || ',msgid              => l_message_id);';
+            end;
         end if;
     
         bdy := bdy || nlt || 'end;';
@@ -2455,6 +2469,7 @@ create or replace package body tapir is
         p_event_type  in varchar2 default null
     ) is
         l_type all_types.type_name%type;
+        l_table all_tables.table_name%type;
     begin
         if not has_priv_for_sys_('DBMS_AQADM', p_schema_name) then
             raise_application_error(-20000, 'User ' || p_schema_name || ' is missing privileges to access DBMS_AQADM.');
@@ -2474,18 +2489,27 @@ create or replace package body tapir is
                                   'ce_source varchar2(200),' || nl || 'ce_data clob' || nl || ');';
         end;
     
-        execute immediate 'begin' || nl || 'sys.dbms_aqadm.create_queue_table(queue_table => ''' || p_schema_name ||
-                          '.'' || ' || nl || 'sys.dbms_assert.simple_sql_name(''' || p_queue_name || ''') || ''' ||
-                          ce_table_name_suffix || ''',' || nl || 'queue_payload_type => ''' ||
-                          nvl(p_event_type, type_cloud_event) || ''',' || nl || 'sort_list => ''enq_time'',' || nl ||
-                          'multiple_consumers => true,' || nl || 'compatible => ''10.0'',' || nl ||
-                          'comment => ''cloudevents from ' || upper($$plsql_unit) || ''');' || nl || 'end;';
-        execute immediate 'begin' || nl || 'sys.dbms_aqadm.create_queue(queue_name => ''' || p_schema_name ||
-                          ''' || ''.'' || ''' || p_queue_name || ''',' || nl || 'queue_table => ''' || p_schema_name ||
-                          ''' || ''.'' || ''' || p_queue_name || ce_table_name_suffix || ''',' || nl ||
-                          'queue_type => 0,' || nl || 'max_retries => 2000000000,' || nl || 'retry_delay => 0,' || nl ||
-                          'dependency_tracking => false);' || nl || 'end;';
-        execute immediate 'begin' || nl || 'sys.dbms_aqadm.start_queue(''' || p_queue_name || ''');' || nl || 'end;';
+        begin
+            select t.table_name
+              into l_table
+              from all_tables t
+             where t.owner = upper(p_schema_name)
+                   and t.table_name = upper(sys.dbms_assert.simple_sql_name(p_queue_name) || ce_table_name_suffix);
+        exception
+            when no_data_found then
+                execute immediate 'begin' || nl || 'sys.dbms_aqadm.create_queue_table(queue_table => ''' || p_schema_name ||
+                                  '.'' || ' || nl || 'sys.dbms_assert.simple_sql_name(''' || p_queue_name || ''') || ''' ||
+                                  ce_table_name_suffix || ''',' || nl || 'queue_payload_type => ''' ||
+                                  nvl(p_event_type, type_cloud_event) || ''',' || nl || 'sort_list => ''enq_time'',' || nl ||
+                                  'multiple_consumers => true,' || nl || 'compatible => ''10.0'',' || nl ||
+                                  'comment => ''cloudevents from ' || upper($$plsql_unit) || ''');' || nl || 'end;';
+                execute immediate 'begin' || nl || 'sys.dbms_aqadm.create_queue(queue_name => ''' || p_schema_name ||
+                                  ''' || ''.'' || ''' || p_queue_name || ''',' || nl || 'queue_table => ''' || p_schema_name ||
+                                  ''' || ''.'' || ''' || p_queue_name || ce_table_name_suffix || ''',' || nl ||
+                                  'queue_type => 0,' || nl || 'max_retries => 2000000000,' || nl || 'retry_delay => 0,' || nl ||
+                                  'dependency_tracking => false);' || nl || 'end;';
+                execute immediate 'begin' || nl || 'sys.dbms_aqadm.start_queue(''' || p_queue_name || ''');' || nl || 'end;';
+        end;
     end;
 
     procedure drop_ce_queue
@@ -2611,11 +2635,10 @@ create or replace package body tapir is
                   from all_queues q
                   left outer join all_tab_privs p on q.owner = p.table_schema
                                                      and q.name = p.table_name
-                                                     and p.grantee = g_owner
+                                                     --and p.grantee = g_owner
                                                      and p.privilege = 'ENQUEUE'
-                 where q.name = upper(params.cloud_events.aq_queue_name)
-                       and nvl(p.grantee, q.owner) = upper(g_owner);
-                with_cloud_events := true;
+                 where q.name = upper(params.cloud_events.aq_queue_name);
+                with_cloud_events := with_cloud_events or l_priv is not null;
             exception
                 when no_data_found then
                     raise_application_error(-20000,
@@ -2633,9 +2656,8 @@ create or replace package body tapir is
                   left outer join all_tab_privs p on t.owner = p.table_schema
                                                      and t.table_name = p.table_name
                                                      and p.privilege = 'INSERT'
-                 where t.table_name = upper(params.cloud_events.table_name)
-                       and nvl(p.grantee, t.owner) = upper(g_owner);
-                with_cloud_events := l_priv is not null;
+                 where t.table_name = upper(params.cloud_events.table_name);
+                with_cloud_events := with_cloud_events or l_priv is not null;
             exception
                 when no_data_found then
                     raise_application_error(-20000,
