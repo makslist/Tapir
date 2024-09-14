@@ -17,6 +17,10 @@ create or replace package test_tapir_generate is
     procedure test_table_does_not_exist;
 
     --%test
+    --%throws(-20000)
+    procedure test_table_name_is_null;
+
+    --%test
     procedure test_tapi_source;
 
     --%test
@@ -30,6 +34,11 @@ create or replace package test_tapir_generate is
     --%test
     --%rollback(manual)
     procedure test_tapi_compile_crud;
+
+    --%test
+    --%throws(-20000)
+    --%rollback(manual)
+    procedure test_tapi_compile_failes_when_result_cache_with_lobs;
 
     --%test
     --%rollback(manual)
@@ -50,6 +59,10 @@ create or replace package test_tapir_generate is
     --%test
     --%rollback(manual)
     procedure test_tapi_compile_column_default_exp;
+
+    --%test
+    --%rollback(manual)
+    procedure test_tapi_source_no_boolean_pseudo_type;
 
     --%test
     --%rollback(manual)
@@ -93,6 +106,10 @@ create or replace package test_tapir_generate is
 
     --%test
     --%rollback(manual)
+    procedure test_tapi_compile_raise_error_on_failed_update_delete;
+
+    --%test
+    --%rollback(manual)
     procedure test_tapi_compile_no_record_default_expression;
 
     --%test
@@ -126,6 +143,11 @@ create or replace package test_tapir_generate is
     --%test
     --%rollback(manual)
     procedure test_tapi_compile_cloud_event_queue;
+
+    --%test
+    --%throws(-20000)
+    --%rollback(manual)
+    procedure test_tapi_drop_cloud_event_queue;
 
 end;
 /

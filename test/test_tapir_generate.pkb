@@ -62,6 +62,12 @@ create or replace package body test_tapir_generate is
         tapir.compile_tapi(p_table_name => 'table_does_not_exist');
     end;
 
+    procedure test_table_name_is_null is
+    begin
+        tapir.init(tapir.params_t());
+        tapir.compile_tapi(p_table_name => null);
+    end;
+
     procedure test_tapi_source is
         l_source clob;
     begin
@@ -107,6 +113,13 @@ create or replace package body test_tapir_generate is
         tapir.compile_tapi(p_table_name => 'test_table_all_types');
     end;
 
+    procedure test_tapi_compile_failes_when_result_cache_with_lobs is
+    begin
+        tapir.init(tapir.params_t(tapi_name               => tapir.mapping('^(.*)$' => 'test_tapir$failed'),
+                                  use_result_cache        => true));
+        tapir.compile_tapi(p_table_name => 'test_table_all_types');
+    end;
+
     procedure test_tapi_compile_row_version is
     begin
         tapir.init(tapir.params_t(tapi_name     => tapir.mapping('^(.*)$' => 'test_tapir$row_version'),
@@ -115,8 +128,8 @@ create or replace package body test_tapir_generate is
                                   bulk_proc     => tapir.bulk_t(generate => false),
                                   proc_json_obj => null,
                                   proc_of_json  => null,
-                                  defaults      => tapir.defaults_t(init_record_expressions     => l_col_defaults,
-                                                                    increase_row_version_column => 'char_t')));
+                                  defaults      => tapir.defaults_t(init_record_expressions => l_col_defaults,
+                                                                    row_version_column      => 'number_t')));
         tapir.compile_tapi(p_table_name => 'test_table_all_types');
     end;
 
@@ -167,10 +180,24 @@ create or replace package body test_tapir_generate is
                                   create_occ_procedures => true,
                                   proc_json_obj         => null,
                                   proc_of_json          => null,
-                                  defaults              => tapir.defaults_t(init_record_expressions     => l_col_defaults,
-                                                                            column_expressions          => l_col_defaults,
-                                                                            increase_row_version_column => 'char_t')));
+                                  defaults              => tapir.defaults_t(init_record_expressions => l_col_defaults,
+                                                                            column_expressions      => l_col_defaults,
+                                                                            row_version_column      => 'number_t')));
         tapir.compile_tapi(p_table_name => 'test_table_all_types');
+    end;
+
+    procedure test_tapi_source_no_boolean_pseudo_type is
+        l_source clob;
+    begin
+        tapir.init(tapir.params_t(tapi_name               => tapir.mapping('^(.*)$' => 'test_tapir$no_boolean_pseudo_type'),
+                                  audit                   => null,
+                                  proc_pipe               => null,
+                                  proc_json_obj           => null,
+                                  proc_of_json            => null,
+                                  log_exception_procedure => 'dbms_output.put_line(\1)',
+                                  boolean_pseudo_type     => null,
+                                  defaults                => l_defaults));
+        l_source := tapir.tapi_source(p_table_name => 'test_table_all_types');
     end;
 
     procedure test_tapi_compile_audit is
@@ -288,6 +315,17 @@ create or replace package body test_tapir_generate is
         tapir.compile_tapi(p_table_name => 'test_table_all_types');
     end;
 
+    procedure test_tapi_compile_raise_error_on_failed_update_delete is
+    begin
+        tapir.init(tapir.params_t(tapi_name                           => tapir.mapping('^(.*)$' => 'test_tapir$raise_error_on_failed_update_delete'),
+                                  proc_pipe                           => null,
+                                  proc_json_obj                       => null,
+                                  proc_of_json                        => null,
+                                  raise_error_on_failed_update_delete => true,
+                                  defaults                            => l_defaults));
+        tapir.compile_tapi(p_table_name => 'test_table_all_types');
+    end;
+
     procedure test_tapi_compile_no_record_default_expression is
     begin
         tapir.init(tapir.params_t(tapi_name     => tapir.mapping('^(.*)$' => 'test_tapir$no_record_default'),
@@ -375,6 +413,11 @@ create or replace package body test_tapir_generate is
         tapir.compile_tapi(p_table_name => 'test_table_all_types');
     
         tapir.drop_ce_queue(l_ce_queue);
+    end;
+
+    procedure test_tapi_drop_cloud_event_queue is
+    begin
+        tapir.drop_ce_queue('non_existing', user, true);
     end;
 
 end;

@@ -10,8 +10,19 @@ create or replace package test_tapi authid definer is
     procedure test_insert_with_custom_defaults;
 
     --%test
+    procedure test_print;
+
+    --%test
     --%throws(-1)
     procedure test_insert_dup_val_on_index;
+
+    --%test
+    --%throws(-1)
+    procedure test_insert_dup_val_on_index_unique;
+
+    --%test
+    --%throws(-1400)
+    procedure test_insert_not_null_constraint;
 
     --%test
     --%throws(-20000)
@@ -71,10 +82,24 @@ create or replace package test_tapi authid definer is
     procedure test_select_rows;
 
     --%test
+    procedure test_pipe_rows;
+
+    --%test
+    procedure test_pipe_rows_cursor_closed;
+
+    --%test
     procedure test_non_unique_index_cursors;
 
     --%test
     procedure test_update;
+
+    --%test
+    --%throws(-1)
+    procedure test_update_dup_val_on_index;
+
+    --%test
+    --%throws(-1407)
+    procedure test_update_not_null;
 
     --%test
     procedure test_update_rows;

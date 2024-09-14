@@ -124,50 +124,54 @@ create index if not exists test_table_col_idx on test_table(number_t)
 
 prompt GENERATE TEST TAPI PACKAGE
 declare
-    init_values tapir.mapping := tapir.mapping('VARCHAR2_T'                       => 'sys.dbms_random.string(''L'', round(sys.dbms_random.value(1, 100)))',
-                                               'CHAR_T'                           => 'sys.dbms_random.string(''L'', 1)',
-                                               'NCHAR_T'                          => 'sys.dbms_random.string(''L'', 1)',
-                                               'NVARCHAR2_T'                      => 'sys.dbms_random.string(''L'', round(sys.dbms_random.value(1, 100)))',
-                                               'NUMBER_T'                         => 'round(sys.dbms_random.value(1, 1024 * 1024))',
-                                               'FLOAT_T'                          => 'to_number(2)',
-                                               'BINARY_FLOAT_T'                   => 'round(sys.dbms_random.value(1, 1024 * 1024))',
-                                               'BINARY_DOUBLE_T'                  => 'round(sys.dbms_random.value(1, 1024 * 1024))',
-                                               'DATE_T'                           => 'sysdate',
-                                               'TIMESTAMP_T'                      => 'systimestamp',
-                                               'TIMESTAMP_WITH_LOCAL_TIME_ZONE_T' => 'systimestamp',
-                                               'TIMESTAMP_WITH_TIME_ZONE_T'       => 'systimestamp',
-                                               'INTERVAL_YEAR_TO_MONTH_T'         => '(systimestamp - to_date(''2024'', ''YYYY'')) year(9) to month',
-                                               'INTERVAL_DAY_TO_SECOND_T'         => '(systimestamp - to_date(''2024'', ''YYYY'')) day(9) to second',
-                                               'BLOB_T'                           => 'utl_raw.cast_to_raw(''blob'')',
-                                               'CLOB_T'                           => 'substr(sys_guid(), 1, 20)',
-                                               'NCLOB_T'                          => 'substr(sys_guid(), 1, 20)',
-                                               'RAW_T'                            => 'utl_raw.cast_to_raw(''raw'')',
-                                               'BOOL_T'                           => 'true',
-                                               'ROWID_T'                          => '''1''');
-   l_queue_name  varchar2(100) := 'tapi_aq';
-   l_event_type  varchar2(100) := 'tapi_cloud_event';
-   l_ce_tab_name varchar2(100) := 'tapi_ce_tab';
+    init_values   tapir.mapping := tapir.mapping('VARCHAR2_T'                       => 'sys.dbms_random.string(''L'', round(sys.dbms_random.value(1, 100)))',
+                                                 'CHAR_T'                           => 'sys.dbms_random.string(''L'', 1)',
+                                                 'NCHAR_T'                          => 'sys.dbms_random.string(''L'', 1)',
+                                                 'NVARCHAR2_T'                      => 'sys.dbms_random.string(''L'', round(sys.dbms_random.value(1, 100)))',
+                                                 'NUMBER_T'                         => 'round(sys.dbms_random.value(1, 1024 * 1024))',
+                                                 'FLOAT_T'                          => 'to_number(2)',
+                                                 'BINARY_FLOAT_T'                   => 'round(sys.dbms_random.value(1, 1024 * 1024))',
+                                                 'BINARY_DOUBLE_T'                  => 'round(sys.dbms_random.value(1, 1024 * 1024))',
+                                                 'DATE_T'                           => 'sysdate',
+                                                 'TIMESTAMP_T'                      => 'systimestamp',
+                                                 'TIMESTAMP_WITH_LOCAL_TIME_ZONE_T' => 'systimestamp',
+                                                 'TIMESTAMP_WITH_TIME_ZONE_T'       => 'systimestamp',
+                                                 'INTERVAL_YEAR_TO_MONTH_T'         => '(systimestamp - to_date(''2024'', ''YYYY'')) year(9) to month',
+                                                 'INTERVAL_DAY_TO_SECOND_T'         => '(systimestamp - to_date(''2024'', ''YYYY'')) day(9) to second',
+                                                 'BLOB_T'                           => 'utl_raw.cast_to_raw(''blob'')',
+                                                 'CLOB_T'                           => 'substr(sys_guid(), 1, 20)',
+                                                 'NCLOB_T'                          => 'substr(sys_guid(), 1, 20)',
+                                                 'RAW_T'                            => 'utl_raw.cast_to_raw(''raw'')',
+                                                 'BOOL_T'                           => 'true',
+                                                 'ROWID_T'                          => '''1''');
+    l_queue_name  varchar2(100) := 'tapi_aq';
+    l_event_type  varchar2(100) := 'tapi_cloud_event';
+    l_ce_tab_name varchar2(100) := 'tapi_ce_table';
 begin
-   execute immediate 'drop table if exists ' || l_ce_tab_name;
-   tapir.create_ce_table(l_ce_tab_name, user, true, 16);
+    execute immediate 'drop table if exists ' || l_ce_tab_name;
+    tapir.create_ce_table(p_table_name => l_ce_tab_name,
+                          p_schema_name => user,
+                          p_immutable => false,
+                          p_retention_days => null);
 
-   tapir.drop_ce_queue(p_queue_name => l_queue_name, p_drop_type => true);
-   tapir.create_ce_queue(p_queue_name => l_queue_name,
-                         p_event_type => l_event_type);
+    tapir.drop_ce_queue(p_queue_name => l_queue_name, p_drop_type => true);
+    tapir.create_ce_queue(p_queue_name => l_queue_name, p_event_type => l_event_type);
 
-   tapir.init(tapir.params_t(tapi_name                           => tapir.mapping('^(.*)$' => '\1$tapi'),
-                             proc_pipe                           => null,
-                             create_occ_procedures               => true,
-                             raise_error_on_failed_update_delete => true,
-                             audit                               => tapir.audit_t(user_exp              => '''me''',
-                                                                                  col_created_by        => 'created_by',
-                                                                                  col_created_date      => 'created_at',
-                                                                                  col_modified_by       => 'modified_by',
-                                                                                  col_modified_date     => 'modified_at',
-                                                                                  ignore_when_comparing => true),
-                             defaults                            => tapir.defaults_t(init_record_expressions => init_values),
-                             cloud_events                        => tapir.cloud_events_t(table_name     => l_ce_tab_name,
-                                                                                         aq_queue_name  => l_queue_name)));
+    tapir.init(tapir.params_t(tapi_name                           => tapir.mapping('^(.*)$' => '\1$tapi'),
+                              create_occ_procedures               => true,
+                              raise_error_on_failed_update_delete => true,
+                              boolean_pseudo_type                 => tapir.boolean_pseudo_type_t(),
+                              log_exception_procedure             => 'dbms_output.put_line(\1)',
+                              use_result_cache                    => false,
+                              audit                               => tapir.audit_t(user_exp              => '''me''',
+                                                                                   col_created_by        => 'created_by',
+                                                                                   col_created_date      => 'created_at',
+                                                                                   col_modified_by       => 'modified_by',
+                                                                                   col_modified_date     => 'modified_at',
+                                                                                   ignore_when_comparing => true),
+                              defaults                            => tapir.defaults_t(init_record_expressions => init_values),
+                              cloud_events                        => tapir.cloud_events_t(table_name    => l_ce_tab_name,
+                                                                                          aq_queue_name => l_queue_name)));
     tapir.compile_tapi(p_table_name => 'test_table');
 end;
 /
