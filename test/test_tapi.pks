@@ -82,10 +82,10 @@ create or replace package test_tapi authid definer is
     procedure test_select_rows;
 
     --%test
-    procedure test_pipe_rows;
+    procedure test_pipe_tf;
 
     --%test
-    procedure test_pipe_rows_cursor_closed;
+    procedure test_pipe_tf_cursor_closed;
 
     --%test
     procedure test_non_unique_index_cursors;
@@ -126,6 +126,9 @@ create or replace package test_tapi authid definer is
     procedure test_delete_unique_col_no_data_found;
 
     --%test
+    procedure test_delete_rows;
+
+    --%test
     procedure test_audit_insert;
 
     --%test
@@ -146,6 +149,9 @@ create or replace package test_tapi authid definer is
     --%test
     procedure test_checksum;
 
+    --%test
+    procedure test_strip_checksum;
+    
     --%test
     procedure test_select_opt;
 

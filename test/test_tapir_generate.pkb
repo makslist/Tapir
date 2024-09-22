@@ -5,7 +5,7 @@ create or replace package body test_tapir_generate is
                                                   'NCHAR_T'                          => 'sys.dbms_random.string(''L'', 1)',
                                                   'NVARCHAR2_T'                      => 'sys.dbms_random.string(''L'', round(sys.dbms_random.value(1, 100)))',
                                                   'NUMBER_T'                         => 'round(sys.dbms_random.value(1, 1024 * 1024))',
-                                                  'FLOAT_T'                          => 'to_number(2)',
+                                                  'FLOAT_T'                          => '2',
                                                   'BINARY_FLOAT_T'                   => 'round(sys.dbms_random.value(1, 1024 * 1024))',
                                                   'BINARY_DOUBLE_T'                  => 'round(sys.dbms_random.value(1, 1024 * 1024))',
                                                   'DATE_T'                           => 'sysdate',
@@ -115,74 +115,99 @@ create or replace package body test_tapir_generate is
 
     procedure test_tapi_compile_failes_when_result_cache_with_lobs is
     begin
-        tapir.init(tapir.params_t(tapi_name               => tapir.mapping('^(.*)$' => 'test_tapir$failed'),
-                                  use_result_cache        => true));
+        tapir.init(tapir.params_t(tapi_name        => tapir.mapping('^(.*)$' => 'test_tapir$failed'),
+                                  use_result_cache => true));
         tapir.compile_tapi(p_table_name => 'test_table_all_types');
     end;
 
     procedure test_tapi_compile_row_version is
     begin
-        tapir.init(tapir.params_t(tapi_name     => tapir.mapping('^(.*)$' => 'test_tapir$row_version'),
-                                  audit         => null,
-                                  proc_pipe     => null,
-                                  bulk_proc     => tapir.bulk_t(generate => false),
-                                  proc_json_obj => null,
-                                  proc_of_json  => null,
-                                  defaults      => tapir.defaults_t(init_record_expressions => l_col_defaults,
-                                                                    row_version_column      => 'number_t')));
+        tapir.init(tapir.params_t(tapi_name           => tapir.mapping('^(.*)$' => 'test_tapir$row_version'),
+                                  audit               => null,
+                                  proc_pipe           => null,
+                                  bulk_proc           => tapir.bulk_proc_t(generate => false),
+                                  proc_json_obj       => null,
+                                  proc_of_json        => null,
+                                  defaults            => tapir.defaults_t(init_record_expressions => l_col_defaults),
+                                  concurrency_control => tapir.concurrency_control_t(opt_lock_generate  => true,
+                                                                                     row_version_column => 'row_version')));
+        tapir.compile_tapi(p_table_name => 'test_table_all_types');
+    end;
+
+    procedure test_tapi_compile_row_version_col_not_in_table is
+    begin
+        tapir.init(tapir.params_t(tapi_name           => tapir.mapping('^(.*)$' => 'test_tapir$row_version'),
+                                  concurrency_control => tapir.concurrency_control_t(opt_lock_generate  => true,
+                                                                                     row_version_column => 'not_existing')));
         tapir.compile_tapi(p_table_name => 'test_table_all_types');
     end;
 
     procedure test_tapi_compile_double_quoted_names is
     begin
-        tapir.init(tapir.params_t(tapi_name             => tapir.mapping('^(.*)$' => 'test_tapir$double_quote'),
-                                  audit                 => null,
-                                  proc_pipe             => null,
-                                  create_occ_procedures => true,
-                                  proc_json_obj         => null,
-                                  proc_of_json          => null,
-                                  double_quote_names    => true,
-                                  defaults              => l_defaults));
+        tapir.init(tapir.params_t(tapi_name           => tapir.mapping('^(.*)$' => 'test_tapir$double_quote'),
+                                  audit               => null,
+                                  proc_pipe           => null,
+                                  proc_json_obj       => null,
+                                  proc_of_json        => null,
+                                  double_quote_names  => true,
+                                  defaults            => l_defaults,
+                                  concurrency_control => tapir.concurrency_control_t(opt_lock_generate  => true,
+                                                                                     row_version_column => null)));
         tapir.compile_tapi(p_table_name => 'test_table_all_types');
     end;
 
     procedure test_tapi_compile_lock_timeout is
     begin
-        tapir.init(tapir.params_t(tapi_name             => tapir.mapping('^(.*)$' => 'test_tapir$lock_timeout'),
-                                  audit                 => null,
-                                  proc_pipe             => null,
-                                  create_occ_procedures => true,
-                                  proc_json_obj         => null,
-                                  proc_of_json          => null,
-                                  acquire_lock_timeout  => 1,
-                                  defaults              => l_defaults));
+        tapir.init(tapir.params_t(tapi_name            => tapir.mapping('^(.*)$' => 'test_tapir$lock_timeout'),
+                                  audit                => null,
+                                  proc_pipe            => null,
+                                  proc_json_obj        => null,
+                                  proc_of_json         => null,
+                                  defaults             => l_defaults,
+                                  concurrency_control  => tapir.concurrency_control_t(acquire_lock_timeout => 1,
+                                                                                      opt_lock_generate  => true,
+                                                                                      row_version_column => null)));
         tapir.compile_tapi(p_table_name => 'test_table_all_types');
     end;
 
     procedure test_tapi_compile_lock_timeout_no_wait is
     begin
-        tapir.init(tapir.params_t(tapi_name             => tapir.mapping('^(.*)$' => 'test_tapir$lock_timeout_no_wait'),
-                                  audit                 => null,
-                                  proc_pipe             => null,
-                                  create_occ_procedures => true,
-                                  proc_json_obj         => null,
-                                  proc_of_json          => null,
-                                  acquire_lock_timeout  => 0,
-                                  defaults              => l_defaults));
+        tapir.init(tapir.params_t(tapi_name            => tapir.mapping('^(.*)$' => 'test_tapir$lock_timeout_no_wait'),
+                                  audit                => null,
+                                  proc_pipe            => null,
+                                  proc_json_obj        => null,
+                                  proc_of_json         => null,
+                                  defaults             => l_defaults,
+                                  concurrency_control  => tapir.concurrency_control_t(acquire_lock_timeout => 0,
+                                                                                      opt_lock_generate  => true,
+                                                                                      row_version_column => null)));
         tapir.compile_tapi(p_table_name => 'test_table_all_types');
     end;
 
     procedure test_tapi_compile_column_default_exp is
     begin
-        tapir.init(tapir.params_t(tapi_name             => tapir.mapping('^(.*)$' => 'test_tapir$column_default_exp'),
-                                  audit                 => null,
-                                  proc_pipe             => null,
-                                  create_occ_procedures => true,
-                                  proc_json_obj         => null,
-                                  proc_of_json          => null,
-                                  defaults              => tapir.defaults_t(init_record_expressions => l_col_defaults,
-                                                                            column_expressions      => l_col_defaults,
-                                                                            row_version_column      => 'number_t')));
+        tapir.init(tapir.params_t(tapi_name           => tapir.mapping('^(.*)$' => 'test_tapir$column_default_exp'),
+                                  audit               => null,
+                                  proc_pipe           => null,
+                                  proc_json_obj       => null,
+                                  proc_of_json        => null,
+                                  defaults            => tapir.defaults_t(),
+                                  concurrency_control => tapir.concurrency_control_t(opt_lock_generate  => true,
+                                                                                     row_version_column => null)));
+        tapir.compile_tapi(p_table_name => 'test_table_all_types');
+    end;
+
+    procedure test_tapi_compile_column_expression is
+    begin
+        tapir.init(tapir.params_t(tapi_name           => tapir.mapping('^(.*)$' => 'test_tapir$column_expression'),
+                                  audit               => null,
+                                  proc_pipe           => null,
+                                  proc_json_obj       => null,
+                                  proc_of_json        => null,
+                                  defaults            => tapir.defaults_t(init_record_expressions => l_col_defaults,
+                                                                          column_expressions      => l_col_defaults),
+                                  concurrency_control => tapir.concurrency_control_t(opt_lock_generate  => true,
+                                                                                     row_version_column => null)));
         tapir.compile_tapi(p_table_name => 'test_table_all_types');
     end;
 
@@ -217,28 +242,46 @@ create or replace package body test_tapir_generate is
 
     procedure test_tapi_compile_audit_ignore_when_comparing is
     begin
-        tapir.init(tapir.params_t(tapi_name     => tapir.mapping('^(.*)$' => 'test_tapir$audit_ignore_compare'),
-                                  proc_pipe     => null,
-                                  proc_json_obj => null,
-                                  proc_of_json  => null,
-                                  audit         => tapir.audit_t(user_exp              => '''me''',
-                                                                 col_created_by        => 'created_by',
-                                                                 col_created_date      => 'created_at',
-                                                                 col_modified_by       => 'modified_by',
-                                                                 col_modified_date     => 'modified_at',
-                                                                 ignore_when_comparing => true),
-                                  defaults      => l_defaults));
+        tapir.init(tapir.params_t(tapi_name                               => tapir.mapping('^(.*)$' => 'test_tapir$audit_ignore_compare'),
+                                  proc_pipe                               => null,
+                                  proc_json_obj                           => null,
+                                  proc_of_json                            => null,
+                                  audit                                   => tapir.audit_t(user_exp          => '''me''',
+                                                                                           col_created_by    => 'created_by',
+                                                                                           col_created_date  => 'created_at',
+                                                                                           col_modified_by   => 'modified_by',
+                                                                                           col_modified_date => 'modified_at'),
+                                  ignore_meta_data_columns_when_comparing => true,
+                                  defaults                                => l_defaults));
+        tapir.compile_tapi(p_table_name => 'test_table_all_types');
+    end;
+
+    procedure test_tapi_compile_audit_record_user_override is
+    begin
+        tapir.init(tapir.params_t(tapi_name                               => tapir.mapping('^(.*)$' => 'test_tapir$audit_ignore_compare'),
+                                  proc_pipe                               => null,
+                                  proc_json_obj                           => null,
+                                  proc_of_json                            => null,
+                                  audit                                   => tapir.audit_t(user_exp             => '''me''',
+                                                                                           col_created_by       => 'created_by',
+                                                                                           col_created_date     => 'created_at',
+                                                                                           col_modified_by      => 'modified_by',
+                                                                                           col_modified_date    => 'modified_at',
+                                                                                           record_user_override => true),
+                                  ignore_meta_data_columns_when_comparing => true,
+                                  defaults                                => l_defaults));
         tapir.compile_tapi(p_table_name => 'test_table_all_types');
     end;
 
     procedure test_tapi_compile_occ_procedures is
     begin
-        tapir.init(tapir.params_t(tapi_name             => tapir.mapping('^(.*)$' => 'test_tapir$occ_procedures'),
-                                  proc_pipe             => null,
-                                  proc_json_obj         => null,
-                                  proc_of_json          => null,
-                                  create_occ_procedures => true,
-                                  defaults              => l_defaults));
+        tapir.init(tapir.params_t(tapi_name           => tapir.mapping('^(.*)$' => 'test_tapir$occ_procedures'),
+                                  proc_pipe           => null,
+                                  proc_json_obj       => null,
+                                  proc_of_json        => null,
+                                  defaults            => l_defaults,
+                                  concurrency_control => tapir.concurrency_control_t(opt_lock_generate  => true,
+                                                                                     row_version_column => null)));
         tapir.compile_tapi(p_table_name => 'test_table_non_lob_types');
     end;
 
@@ -258,8 +301,8 @@ create or replace package body test_tapir_generate is
         tapir.init(tapir.params_t(tapi_name        => tapir.mapping('^(.*)$' => 'test_tapir$no_lock_proc'),
                                   proc_pipe        => null,
                                   proc_of_json     => null,
-                                  proc_lock_record => null,
-                                  defaults         => l_defaults));
+                                  defaults         => l_defaults,
+                                  concurrency_control => tapir.concurrency_control_t(proc_lock_record => null)));
         tapir.compile_tapi(p_table_name => 'test_table_non_lob_types');
     end;
 
@@ -281,6 +324,19 @@ create or replace package body test_tapir_generate is
                                   proc_diff               => null,
                                   proc_json_obj           => null,
                                   defaults                => l_defaults));
+        tapir.compile_tapi(p_table_name => 'test_table_all_types');
+    end;
+
+    procedure test_tapi_compile_no_print is
+    begin
+        tapir.init(tapir.params_t(tapi_name               => tapir.mapping('^(.*)$' => 'test_tapir$no_logging'),
+                                  proc_pipe               => null,
+                                  log_exception_procedure => null,
+                                  proc_diff               => null,
+                                  proc_json_obj           => null,
+                                  defaults                => l_defaults,
+                                  print_proc              => tapir.print_proc_t(proc_print     => null,
+                                                                                print_function => null)));
         tapir.compile_tapi(p_table_name => 'test_table_all_types');
     end;
 
@@ -382,7 +438,8 @@ create or replace package body test_tapir_generate is
                                   proc_pipe     => null,
                                   proc_json_obj => null,
                                   proc_of_json  => null,
-                                  cloud_events  => tapir.cloud_events_t(aq_queue_name => 'non_existing')));
+                                  cloud_events  => tapir.cloud_events_t(aq_queue_name     => 'non_existing',
+                                                                        aq_recipient_list => tapir.str_list('CONSUMER'))));
     end;
 
     procedure test_tapi_compile_cloud_event_table is
@@ -409,7 +466,8 @@ create or replace package body test_tapir_generate is
                                   proc_pipe     => null,
                                   proc_json_obj => null,
                                   proc_of_json  => null,
-                                  cloud_events  => tapir.cloud_events_t(aq_queue_name => l_ce_queue)));
+                                  cloud_events  => tapir.cloud_events_t(aq_queue_name     => l_ce_queue,
+                                                                        aq_recipient_list => tapir.str_list('CONSUMER'))));
         tapir.compile_tapi(p_table_name => 'test_table_all_types');
     
         tapir.drop_ce_queue(l_ce_queue);

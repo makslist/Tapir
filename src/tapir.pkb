@@ -97,16 +97,18 @@ create or replace package body tapir is
 
     type_name_suffix           constant str := '_t';
     type_rt_name               constant str := 'rt';
-    occ_name_suffix            constant str := '_opt';
-    type_rt_name_occ           constant str := type_rt_name || occ_name_suffix;
+    opt_lock_suffix            constant str := '_opt';
+    cur_checksum_name_suffix   constant str := '_checksum';
+    type_rt_name_check         constant str := type_rt_name || cur_checksum_name_suffix;
     type_rows_tab              constant str := 'rows_tab';
     type_ref_cursor            constant str := 'strong_ref_cursor';
     type_col_hash              constant str := 'checksum_t';
     type_cloud_event           constant str := 'cloud_event';
     ce_table_name_suffix       constant str := '_tab';
+    bulk_proc_suffix           constant str := '_rows';
     cursor_prefix              constant str := 'cur_idx';
     cursor_suffix_pk           constant str := '_pk';
-    proc_name_raise_if_null    constant str := 'raise_if_null';
+    proc_name_assert_not_null  constant str := 'assert_not_null';
     proc_name_pk_string        constant str := 'pk_str';
     param_name_row             constant str := 'rec';
     proc_name_emit_cloud_event constant str := 'emit_cloud_event';
@@ -224,20 +226,20 @@ create or replace package body tapir is
         close p_ref_cursor;
         g_includes_lobs     := false;
         g_includes_binaries := false;
-        for idx in 1 .. g_cols.count loop
-            g_cols(idx).data_default := regexp_replace(g_cols(idx).data_default,
-                                                       '(^([[:space:]]|[[:cntrl:]])*|([[:space:]]|[[:cntrl:]])*$)');
-            if params.warn_about_null_string_default and lower(g_cols(idx).data_default) = '''null''' then
+        for i in 1 .. g_cols.count loop
+            g_cols(i).data_default := regexp_replace(g_cols(i).data_default,
+                                                     '(^([[:space:]]|[[:cntrl:]])*|([[:space:]]|[[:cntrl:]])*$)');
+            if params.warn_about_null_string_default and lower(g_cols(i).data_default) = '''null''' then
                 raise_application_error(-20000,
                                         'Encountered default value ''null'' for column ' || lower(table_name) || '.' ||
-                                        lower(g_cols(idx).col_name));
+                                        lower(g_cols(i).col_name));
             end if;
         
-            if lower(g_cols(idx).data_type) member of lob_types then
+            if lower(g_cols(i).data_type) member of lob_types then
                 g_includes_lobs := true;
             end if;
         
-            if lower(g_cols(idx).data_type) member of str_list(c_type_blob, c_type_raw) then
+            if lower(g_cols(i).data_type) member of str_list(c_type_blob, c_type_raw) then
                 g_includes_binaries := true;
             end if;
         end loop;
@@ -381,11 +383,11 @@ create or replace package body tapir is
     function changables(p_tab_cols in tab_cols_t default g_cols) return tab_cols_t is
         l_tab_cols tab_cols_t := tab_cols_t();
     begin
-        for idx in 1 .. p_tab_cols.count loop
-            if p_tab_cols(idx).virtual_column = 'N' and p_tab_cols(idx).identity_column = 'N' and
-                not nvl(p_tab_cols(idx).col_name member of params.exclude_column_when_writing, false) then
+        for i in 1 .. p_tab_cols.count loop
+            if p_tab_cols(i).virtual_column = 'N' and p_tab_cols(i).identity_column = 'N' and
+                not nvl(p_tab_cols(i).col_name member of params.exclude_column_when_writing, false) then
                 l_tab_cols.extend();
-                l_tab_cols(l_tab_cols.last) := p_tab_cols(idx);
+                l_tab_cols(l_tab_cols.last) := p_tab_cols(i);
             end if;
         end loop;
         return l_tab_cols;
@@ -394,14 +396,16 @@ create or replace package body tapir is
     function comparables(p_tab_cols in tab_cols_t default g_cols) return tab_cols_t is
         l_tab_cols tab_cols_t := tab_cols_t();
     begin
-        for idx in 1 .. p_tab_cols.count loop
-            if p_tab_cols(idx).col_name member of
-              scalar_types or (params.audit.ignore_when_comparing and p_tab_cols(idx).col_name member of g_audit_cols) or p_tab_cols(idx).data_type
-              member of lob_types then
+        for i in 1 .. p_tab_cols.count loop
+            if p_tab_cols(i).col_name member of scalar_types or p_tab_cols(i).data_type member of
+              lob_types or
+                (params.ignore_meta_data_columns_when_comparing and
+                 (p_tab_cols(i).col_name member of
+                  g_audit_cols or p_tab_cols(i).col_name = params.concurrency_control.row_version_column)) then
                 null;
             else
                 l_tab_cols.extend();
-                l_tab_cols(l_tab_cols.last) := p_tab_cols(idx);
+                l_tab_cols(l_tab_cols.last) := p_tab_cols(i);
             end if;
         end loop;
         return l_tab_cols;
@@ -415,12 +419,12 @@ create or replace package body tapir is
     ) return tab_cols_t is
         l_tab_cols tab_cols_t := tab_cols_t();
     begin
-        for idx in 1 .. p_tab_cols.count loop
-            if p_tab_cols(idx).col_name member of p_exclude_name or p_tab_cols(idx).data_type member of p_exclude_type then
+        for i in 1 .. p_tab_cols.count loop
+            if p_tab_cols(i).col_name member of p_exclude_name or p_tab_cols(i).data_type member of p_exclude_type then
                 null;
             else
                 l_tab_cols.extend();
-                l_tab_cols(l_tab_cols.last) := p_tab_cols(idx);
+                l_tab_cols(l_tab_cols.last) := p_tab_cols(i);
             end if;
         end loop;
         return l_tab_cols;
@@ -434,10 +438,10 @@ create or replace package body tapir is
     ) return tab_cols_t is
         l_tab_cols tab_cols_t := tab_cols_t();
     begin
-        for idx in 1 .. p_tab_cols.count loop
-            if p_tab_cols(idx).col_name member of p_include_name or p_tab_cols(idx).data_type member of p_include_type then
+        for i in 1 .. p_tab_cols.count loop
+            if p_tab_cols(i).col_name member of p_include_name or p_tab_cols(i).data_type member of p_include_type then
                 l_tab_cols.extend();
-                l_tab_cols(l_tab_cols.last) := p_tab_cols(idx);
+                l_tab_cols(l_tab_cols.last) := p_tab_cols(i);
             end if;
         end loop;
         return l_tab_cols;
@@ -447,9 +451,9 @@ create or replace package body tapir is
         function col_names(p_columns in tab_cols_t) return str_list is
             list str_list := str_list();
         begin
-            for idx in 1 .. p_columns.count loop
+            for i in 1 .. p_columns.count loop
                 list.extend();
-                list(list.last) := p_columns(idx).col_name;
+                list(list.last) := p_columns(i).col_name;
             end loop;
             return list;
         end;
@@ -460,12 +464,12 @@ create or replace package body tapir is
     function non_audit(p_tab_cols in tab_cols_t default g_cols) return tab_cols_t is
         l_tab_cols tab_cols_t := tab_cols_t();
     begin
-        for idx in 1 .. p_tab_cols.count loop
-            if p_tab_cols(idx).col_name member of g_audit_cols then
+        for i in 1 .. p_tab_cols.count loop
+            if p_tab_cols(i).col_name member of g_audit_cols then
                 null;
             else
                 l_tab_cols.extend();
-                l_tab_cols(l_tab_cols.last) := p_tab_cols(idx);
+                l_tab_cols(l_tab_cols.last) := p_tab_cols(i);
             end if;
         end loop;
         return l_tab_cols;
@@ -483,53 +487,53 @@ create or replace package body tapir is
             return case when params.double_quote_names then sys.dbms_assert.enquote_name(p_val) else lower(p_val) end;
         end;
     begin
-        for idx in 1 .. p_cols.count loop
+        for i in 1 .. p_cols.count loop
             l_list.extend();
             l_list(l_list.last) := p_mask;
             l_list(l_list.last) := replace(l_list(l_list.last),
                                            tag_type,
-                                           table_name() || '.' || enquote(p_cols(idx).col_name) || '%type');
+                                           table_name() || '.' || enquote(p_cols(i).col_name) || '%type');
             l_list(l_list.last) := replace(l_list(l_list.last),
                                            tag_json_key,
-                                           lower(p_cols(idx).col_name) || case
-                                               when p_cols(idx).data_type member of binary_types then
+                                           lower(p_cols(i).col_name) || case
+                                               when p_cols(i).data_type member of binary_types then
                                                 '_base64'
                                            end);
             l_list(l_list.last) := regexp_replace(l_list(l_list.last),
                                                   tag_rt_1 || '([^<]*)' || tag_rt_2,
-                                                  '\1' || lower(p_cols(idx).col_name) || case
-                                                      when lower(p_cols(idx).col_name) = lower(g_table_name) then
+                                                  '\1' || lower(p_cols(i).col_name) || case
+                                                      when lower(p_cols(i).col_name) = lower(g_table_name) then
                                                        '_col'
                                                   end);
             l_list(l_list.last) := replace(l_list(l_list.last),
                                            tag_sig_param,
                                            lower(params.parameter_prefix) ||
-                                           lower(rpad(p_cols(idx).col_name, p_cols(idx).max_length, ' ')));
+                                           lower(rpad(p_cols(i).col_name, p_cols(i).max_length, ' ')));
             l_list(l_list.last) := replace(l_list(l_list.last),
                                            tag_param,
-                                           lower(params.parameter_prefix || p_cols(idx).col_name));
-            l_list(l_list.last) := replace(l_list(l_list.last), tag_col, lower(p_cols(idx).col_name));
+                                           lower(params.parameter_prefix || p_cols(i).col_name));
+            l_list(l_list.last) := replace(l_list(l_list.last), tag_col, lower(p_cols(i).col_name));
             l_list(l_list.last) := replace(l_list(l_list.last),
                                            tag_col_pad,
-                                           lower(rpad(p_cols(idx).col_name, p_cols(idx).max_length, ' ')));
+                                           lower(rpad(p_cols(i).col_name, p_cols(i).max_length, ' ')));
             l_list(l_list.last) := replace(l_list(l_list.last),
                                            tag_rt_sig,
-                                           lower(rpad(p_cols(idx).col_name || case
-                                                           when lower(p_cols(idx).col_name) = lower(g_table_name) then
+                                           lower(rpad(p_cols(i).col_name || case
+                                                           when lower(p_cols(i).col_name) = lower(g_table_name) then
                                                             '_col'
                                                        end,
-                                                      p_cols(idx).max_length + 4,
+                                                      p_cols(i).max_length + 4,
                                                       ' ')));
             l_list(l_list.last) := replace(l_list(l_list.last),
                                            tag_rt_asg,
-                                           lower(p_cols(idx).col_name || case
-                                                      when lower(p_cols(idx).col_name) = lower(g_table_name) then
+                                           lower(p_cols(i).col_name || case
+                                                      when lower(p_cols(i).col_name) = lower(g_table_name) then
                                                        '_col'
                                                   end));
             l_list(l_list.last) := regexp_replace(l_list(l_list.last),
                                                   tag_not_null,
                                                   case
-                                                      when p_cols(idx).nullable = 'N' then
+                                                      when p_cols(i).nullable = 'N' then
                                                        ' not null'
                                                       else
                                                        ''
@@ -537,86 +541,118 @@ create or replace package body tapir is
             l_list(l_list.last) := regexp_replace(l_list(l_list.last),
                                                   tag_col_default_1 || '(.*)' || tag_col_default_2,
                                                   case
-                                                      when params.defaults.use_column_defaults and p_cols(idx).data_default is not null then
-                                                       'coalesce(\1, ' || trim(p_cols(idx).data_default) || ')'
-                                                      when lower(p_cols(idx).col_name) = lower(params.defaults.row_version_column) then
+                                                      when lower(p_cols(i).col_name) = lower(params.concurrency_control.row_version_column) then
                                                        'coalesce(\1, 0) + 1'
-                                                      when params.defaults.column_expressions.exists(p_cols(idx).col_name) then
-                                                       params.defaults.column_expressions(p_cols(idx).col_name) --TODO only when inserting or with coalesce
-                                                      when p_cols(idx).col_name member of g_audit_cols_date then
-                                                       case p_cols(idx).data_type
+                                                      when p_cols(i).col_name member of g_audit_cols_date then
+                                                       case p_cols(i).data_type
                                                            when c_type_date then
                                                             'sysdate'
                                                            when c_type_timestamp then
                                                             'systimestamp'
                                                        end
-                                                      when p_cols(idx).col_name member of g_audit_cols_user then
+                                                      when p_cols(i).col_name member of g_audit_cols_user then
                                                        case
                                                            when params.audit.record_user_override then
                                                             'coalesce(\1, ' || params.audit.user_exp || ')'
                                                            else
                                                             params.audit.user_exp
                                                        end
+                                                      when params.defaults.column_expressions.exists(p_cols(i).col_name) then
+                                                       'coalesce(\1, ' || case
+                                                           when p_cols(i).data_type in (c_type_nchar, c_type_nvarchar2) then
+                                                            'to_nchar(' || params.defaults.column_expressions(p_cols(i).col_name) || ')'
+                                                           when p_cols(i).data_type = c_type_clob then
+                                                            'to_clob(' || params.defaults.column_expressions(p_cols(i).col_name) || ')'
+                                                           when p_cols(i).data_type = c_type_nclob then
+                                                            'to_nclob(' || params.defaults.column_expressions(p_cols(i).col_name) || ')'
+                                                           when p_cols(i).data_type = c_type_blob then
+                                                            'to_blob(' || params.defaults.column_expressions(p_cols(i).col_name) || ')'
+                                                           when p_cols(i).data_type member of char_types then
+                                                            'to_char(' || params.defaults.column_expressions(p_cols(i).col_name) || ')'
+                                                           when p_cols(i).data_type member of number_types then
+                                                            'to_number(' || params.defaults.column_expressions(p_cols(i).col_name) || ')'
+                                                           else
+                                                            params.defaults.column_expressions(p_cols(i).col_name)
+                                                       end || ')'
+                                                      when params.defaults.use_column_defaults and p_cols(i).data_default is not null then
+                                                       'coalesce(\1, ' || case
+                                                           when p_cols(i).data_type in (c_type_nchar, c_type_nvarchar2) then
+                                                            'to_nchar(' || trim(p_cols(i).data_default) || ')'
+                                                           when p_cols(i).data_type = c_type_clob then
+                                                            'to_clob(' || trim(p_cols(i).data_default) || ')'
+                                                           when p_cols(i).data_type = c_type_nclob then
+                                                            'to_nclob(' || trim(p_cols(i).data_default) || ')'
+                                                           when p_cols(i).data_type = c_type_blob then
+                                                            'to_blob(' || trim(p_cols(i).data_default) || ')'
+                                                           when p_cols(i).data_type member of char_types then
+                                                            'to_char(' || trim(p_cols(i).data_default) || ')'
+                                                           when p_cols(i).data_type member of number_types then
+                                                            'to_number(' || trim(p_cols(i).data_default) || ')'
+                                                           else
+                                                            trim(p_cols(i).data_default)
+                                                       end || ')'
                                                       else
                                                        '\1'
                                                   end);
             l_list(l_list.last) := replace(l_list(l_list.last),
                                            tag_rec_default,
                                            case
-                                               when params.defaults.init_record_expressions.exists(p_cols(idx).col_name) then
-                                                ' default ' || params.defaults.init_record_expressions(p_cols(idx).col_name)
+                                               when params.defaults.init_record_expressions.exists(p_cols(i).col_name) then
+                                                ' default ' || params.defaults.init_record_expressions(p_cols(i).col_name)
+                                               else
+                                                ' default null'
                                            end);
             l_list(l_list.last) := regexp_replace(l_list(l_list.last),
                                                   tag_col_to_char_1 || '(.*)' || tag_col_to_char_2,
                                                   case
-                                                      when p_cols(idx).data_type member of number_types then
+                                                      when p_cols(i).data_type member of number_types then
                                                        'to_char(\1' || case
                                                            when params.export_format.number_f is not null then
                                                             ', ''' || params.export_format.number_f || ''''
                                                        end || ')'
-                                                      when p_cols(idx).data_type member of datetime_types then
+                                                      when p_cols(i).data_type member of datetime_types then
                                                        'to_char(\1' || case
                                                            when params.export_format.date_f is not null then
                                                             ', ''' || params.export_format.date_f || ''''
                                                        end || ')'
-                                                      when p_cols(idx).data_type member of binary_types then
+                                                      when p_cols(i).data_type member of binary_types then
                                                        'base64_encode(\1)'
-                                                      when p_cols(idx).data_type member of str_list(c_type_clob, c_type_nclob) then
+                                                      when p_cols(i).data_type member of str_list(c_type_clob, c_type_nclob) then
                                                        '\1'
-                                                      when p_cols(idx).data_type = c_type_bool then
+                                                      when p_cols(i).data_type = c_type_bool then
                                                        'case when \1 then ''true'' else ''false'' end'
-                                                      when p_cols(idx).data_type member of char_types then
+                                                      when p_cols(i).data_type member of char_types then
                                                        '\1'
                                                   end);
             l_list(l_list.last) := regexp_replace(l_list(l_list.last),
                                                   tag_json_from_val_1 || '([^<]*)' || tag_json_from_val_2,
                                                   case
-                                                      when p_cols(idx).data_type member of number_types then
-                                                       '\1.get_number(''' || lower(p_cols(idx).col_name) || ''')'
-                                                      when p_cols(idx).data_type = c_type_date then
-                                                       '\1.get_date(''' || lower(p_cols(idx).col_name) || ''')'
-                                                      when p_cols(idx).data_type member of timestamp_types then
-                                                       '\1.get_timestamp(''' || lower(p_cols(idx).col_name) || ''')'
-                                                      when p_cols(idx).data_type = c_type_bool then
-                                                       '\1.get_boolean(''' || lower(p_cols(idx).col_name) || ''')'
-                                                      when p_cols(idx).data_type member of str_list(c_type_clob, c_type_nclob) then
-                                                       '\1.get_clob(''' || lower(p_cols(idx).col_name) || ''')'
-                                                      when p_cols(idx).data_type = c_type_blob then
-                                                       'base64_decode(\1.get_clob(''' || lower(p_cols(idx).col_name) || '_base64' || '''))'
-                                                      when p_cols(idx).data_type = c_type_raw then
-                                                       'base64_decode(\1.get_string(''' || lower(p_cols(idx).col_name) || '_base64' || '''))'
+                                                      when p_cols(i).data_type member of number_types then
+                                                       '\1.get_number(''' || lower(p_cols(i).col_name) || ''')'
+                                                      when p_cols(i).data_type = c_type_date then
+                                                       '\1.get_date(''' || lower(p_cols(i).col_name) || ''')'
+                                                      when p_cols(i).data_type member of timestamp_types then
+                                                       '\1.get_timestamp(''' || lower(p_cols(i).col_name) || ''')'
+                                                      when p_cols(i).data_type = c_type_bool then
+                                                       '\1.get_boolean(''' || lower(p_cols(i).col_name) || ''')'
+                                                      when p_cols(i).data_type member of str_list(c_type_clob, c_type_nclob) then
+                                                       '\1.get_clob(''' || lower(p_cols(i).col_name) || ''')'
+                                                      when p_cols(i).data_type = c_type_blob then
+                                                       'base64_decode(\1.get_clob(''' || lower(p_cols(i).col_name) || '_base64' || '''))'
+                                                      when p_cols(i).data_type = c_type_raw then
+                                                       'base64_decode(\1.get_string(''' || lower(p_cols(i).col_name) || '_base64' || '''))'
                                                       else
-                                                       '\1.get_string(''' || lower(p_cols(idx).col_name) || ''')'
+                                                       '\1.get_string(''' || lower(p_cols(i).col_name) || ''')'
                                                   end);
             l_list(l_list.last) := regexp_replace(l_list(l_list.last),
                                                   tag_quote_1 || '([^<]*)' || tag_quote_2,
-                                                  '\1' || enquote(p_cols(idx).col_name));
+                                                  '\1' || enquote(p_cols(i).col_name));
             l_list(l_list.last) := regexp_replace(l_list(l_list.last),
                                                   tag_json_to_val_1 || '([^<]*)' || tag_json_to_val_2,
                                                   case
-                                                      when p_cols(idx).data_type member of binary_types then
+                                                      when p_cols(i).data_type member of binary_types then
                                                        'base64_encode(\1)'
-                                                      when p_cols(idx).data_type member of datetime_types then
+                                                      when p_cols(i).data_type member of datetime_types then
                                                        'to_char(\1' || case
                                                            when params.export_format.date_f is not null then
                                                             ', ''' || params.export_format.date_f || ''''
@@ -636,16 +672,35 @@ create or replace package body tapir is
 
     function str_join
     (
-        p_list      in str_list,
-        p_delimiter in varchar2
+        p_list        in str_list,
+        p_delimiter   in varchar2,
+        p_append_null in boolean default false
     ) return clob is
         l_res clob;
     begin
-        for idx in 1 .. p_list.count loop
+        for i in 1 .. p_list.count loop
             l_res := l_res || case
-                         when idx > 1 then
+                         when i > 1 and (p_append_null or p_list(i) is not null) then
                           p_delimiter
-                     end || p_list(idx);
+                     end || p_list(i);
+        end loop;
+        return l_res;
+    end;
+
+    function str_join
+    (
+        p_list_1 in str_list,
+        p_list_2 in str_list
+    ) return str_list is
+        l_res str_list := str_list();
+    begin
+        for i in 1 .. p_list_1.count loop
+            l_res.extend();
+            l_res(l_res.last) := p_list_1(i);
+        end loop;
+        for i in 1 .. p_list_2.count loop
+            l_res.extend();
+            l_res(l_res.last) := p_list_2(i);
         end loop;
         return l_res;
     end;
@@ -655,15 +710,23 @@ create or replace package body tapir is
         p_name_ref in varchar2,
         p_name     in varchar2
     ) return varchar2 is
-        initials constant varchar2(30) := regexp_replace(p_name_ref, '([a-z])[a-z]*[^a-z]*', '\1', 1, 0, 'i');
+        l_delimiter  varchar2(2) := '_';
+        l_table_name varchar2(100) := l_delimiter || replace(p_name_ref, l_delimiter, l_delimiter || l_delimiter) ||
+                                      l_delimiter;
+        split_count constant pls_integer := regexp_count(p_name_ref, l_delimiter) + 1;
+        pattern     constant varchar2(100) := l_delimiter || '([^' || l_delimiter || ']*)' || l_delimiter;
+        l_idx_name varchar2(100) := p_name;
     begin
-        return coalesce(trim(regexp_substr(p_name,
-                                           '(' || initials || '|' || p_name_ref || ')' || '_(.*)',
-                                           1,
-                                           1,
-                                           'i',
-                                           2)),
-                        p_name);
+        for i in 1 .. split_count loop
+            l_idx_name := replace(l_idx_name, regexp_substr(l_table_name, pattern, 1, i, null, 1));
+        end loop;
+        l_idx_name := replace(l_idx_name, 'IDX', '_');
+        l_idx_name := regexp_replace(l_idx_name, l_delimiter || '+', l_delimiter);
+        l_idx_name := regexp_replace(l_idx_name,
+                                     '^' || l_delimiter || '*([^' || l_delimiter || '].*[^' || l_delimiter || '])' ||
+                                     l_delimiter || '*$',
+                                     '\1');
+        return l_idx_name;
     end;
 
     function not_equal_exp
@@ -681,14 +744,9 @@ create or replace package body tapir is
         return regexp_replace(errmsg, '^(.*)$', params.log_exception_procedure) || ';';
     end;
 
-    function is_log_dup_val_on_index return boolean is
-    begin
-        return params.log_exception_procedure is not null and g_cons.count > 0;
-    end;
-
     function is_create_diff return boolean is
     begin
-        return params.proc_diff is not null or is_log_dup_val_on_index;
+        return params.proc_diff is not null or (params.log_exception_procedure is not null and g_cons.count > 0);
     end;
 
     function name_proc_json_obj return varchar2 is
@@ -696,14 +754,14 @@ create or replace package body tapir is
         return nvl(params.proc_json_obj, 'json_obj');
     end;
 
-    function tapi_raise_if_null return str is
-        prc_name constant str := 'procedure ' || proc_name_raise_if_null;
+    function tapi_assert_not_null return str is
+        prc_name constant str := 'procedure ' || proc_name_assert_not_null;
         p_val    constant str := params.parameter_prefix || 'val';
         p_param  constant str := params.parameter_prefix || 'param';
         sig      constant str := tab || prc_name || nlt || '(' || nltt || p_val || ' in varchar2' || ',' || nltt ||
                                  p_param || ' in varchar2' || nlt || ')';
         errmsg   constant str := '''Parameter '''''' || ' || p_param || ' || '''''' is null.''';
-        bdy str;
+        bdy clob;
     begin
         bdy := nll || sig || ' is';
         bdy := bdy || nlt || 'begin';
@@ -717,11 +775,11 @@ create or replace package body tapir is
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_base64_encode return str is
+    function tapi_base64_encode return clob is
         p_val constant str := params.parameter_prefix || 'val';
         sig   constant str := tab || 'function base64_encode' || nlt || '(' || nltt || p_val || ' in blob' || nlt ||
                               ') return clob';
-        bdy str;
+        bdy clob;
     begin
         if not g_includes_binaries then
             return null;
@@ -733,21 +791,21 @@ create or replace package body tapir is
         bdy := bdy || nltt || 'if ' || p_val || ' is null or dbms_lob.getlength(' || p_val || ') = 0 then';
         bdy := bdy || nlttt || 'return null;';
         bdy := bdy || nltt || 'end if;';
-        bdy := bdy || nltt || 'for idx in 0 .. trunc((sys.dbms_lob.getlength(' || p_val || ') - 1) / c_step)';
+        bdy := bdy || nltt || 'for i in 0 .. trunc((sys.dbms_lob.getlength(' || p_val || ') - 1) / c_step)';
         bdy := bdy || nltt || 'loop';
         bdy := bdy || nlttt || 'l_b64 := l_b64 ||';
         bdy := bdy || nlttt || '         ' || 'utl_raw.cast_to_varchar2(utl_encode.base64_encode(sys.dbms_lob.substr(' ||
-               p_val || ', c_step, idx * c_step + 1)));';
+               p_val || ', c_step, i * c_step + 1)));';
         bdy := bdy || nltt || 'end loop;';
         bdy := bdy || nltt || 'return l_b64;';
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_base64_decode return str is
+    function tapi_base64_decode return clob is
         p_val constant str := params.parameter_prefix || 'val';
         sig   constant str := tab || 'function base64_decode' || nlt || '(' || nltt || p_val || ' in clob' || nlt ||
                               ') return blob';
-        bdy str;
+        bdy clob;
     begin
         if not g_includes_binaries then
             return null;
@@ -761,21 +819,21 @@ create or replace package body tapir is
         bdy := bdy || nlttt || 'return null;';
         bdy := bdy || nltt || 'end if;';
         bdy := bdy || nltt || 'sys.dbms_lob.createtemporary(temp, false, dbms_lob.call);';
-        bdy := bdy || nltt || 'for idx in 0 .. trunc((sys.dbms_lob.getlength(' || p_val || ') - 1) / c_step)';
+        bdy := bdy || nltt || 'for i in 0 .. trunc((sys.dbms_lob.getlength(' || p_val || ') - 1) / c_step)';
         bdy := bdy || nltt || 'loop';
         bdy := bdy || nlttt || 'l_raw := sys.utl_raw.cast_to_raw(sys.dbms_lob.substr(' || p_val ||
-               ', c_step, idx * c_step + 1));';
+               ', c_step, i * c_step + 1));';
         bdy := bdy || nlttt || 'sys.dbms_lob.append(temp, to_blob(sys.utl_encode.base64_decode(l_raw)));';
         bdy := bdy || nltt || 'end loop;';
         bdy := bdy || nltt || 'return temp;';
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_emit_cloud_event return str is
+    function tapi_emit_cloud_event return clob is
         p_name constant str := 'procedure ' || proc_name_emit_cloud_event;
         sig    constant str := tab || p_name || nlt || '(' || nltt || 'p_type   in varchar2,' || nltt ||
                                'p_source in varchar2,' || nltt || 'p_data   in ' || c_type_json_obj || nlt || ')';
-        bdy str;
+        bdy clob;
     begin
         if not nvl(with_cloud_events, false) then
             return null;
@@ -840,7 +898,11 @@ create or replace package body tapir is
                 bdy := bdy || nlttt || 'enqueue_options    => sys.dbms_aq.enqueue_options_t(),';
                 bdy := bdy || nlttt || 'message_properties => sys.dbms_aq.message_properties_t(';
                 bdy := bdy || nltttt || 'recipient_list => sys.dbms_aq.aq$_recipient_list_t(';
-                bdy := bdy || nlttttt || '1 => sys.aq$_agent(''CONSUMER'', null, 0))),';
+                for i in 1 .. params.cloud_events.aq_recipient_list.count loop
+                    bdy := bdy || nlttttt || to_char(i) || ' => sys.aq$_agent(''' ||
+                           params.cloud_events.aq_recipient_list(i) || ''', null, 0)';
+                end loop;
+                bdy := bdy || ')),';
                 bdy := bdy || nlttt || 'payload            => ' || lower(l_type) || '(' ||
                        'utl_raw.cast_from_number(l_ce_id)' || ', sys_extract_utc(systimestamp)' || ', p_type' ||
                        ', p_source' || ', l_data' || '),';
@@ -852,7 +914,7 @@ create or replace package body tapir is
         return bdy;
     end;
 
-    function tapi_diff_recs(p_only_header in boolean) return str is
+    function tapi_diff_recs(p_only_header in boolean) return clob is
         doc       constant str := tab || '/**' || nlt ||
                                   '* Returns a JSON String containing all columns with different values.' || nlt ||
                                   '* For every contained column, the char representation of the values of both records are included.' || nlt || '*/';
@@ -862,7 +924,7 @@ create or replace package body tapir is
         sig       constant str := prc_name || nlt || '(' || nltt || param_old || ' in ' || type_rt_name || ',' || nltt ||
                                   param_new || ' in ' || type_rt_name || nlt || ') return ' || c_type_json_obj;
         ret_val   constant str := 'diff';
-        bdy str;
+        bdy clob;
     begin
         if not is_create_diff then
             return null;
@@ -900,20 +962,19 @@ create or replace package body tapir is
         bdy := bdy || nltttt || ret_val || '.put(''new'', ' || 'jo_new' || ');';
         bdy := bdy || nltttt || ret_val || '.put(''old'', ' || 'jo_old' || ');';
         bdy := bdy || nltttt || 'l_keys := jo_new.get_keys;';
-        bdy := bdy || nltttt || 'for idx in 1..l_keys.count loop';
-        bdy := bdy || nlttttt ||
-               'if (jo_old.get_string(l_keys(idx)) is null and jo_new.get_string(l_keys(idx)) is null)';
-        bdy := bdy || nlttttt || tab || ' or jo_old.get_string(l_keys(idx)) = jo_new.get_string(l_keys(idx)) then';
-        bdy := bdy || nlttttt || tab || 'jo_old.remove(l_keys(idx));';
-        bdy := bdy || nlttttt || tab || 'jo_new.remove(l_keys(idx));';
+        bdy := bdy || nltttt || 'for i in 1..l_keys.count loop';
+        bdy := bdy || nlttttt || 'if (jo_old.get_string(l_keys(i)) is null and jo_new.get_string(l_keys(i)) is null)';
+        bdy := bdy || nlttttt || tab || ' or jo_old.get_string(l_keys(i)) = jo_new.get_string(l_keys(i)) then';
+        bdy := bdy || nlttttt || tab || 'jo_old.remove(l_keys(i));';
+        bdy := bdy || nlttttt || tab || 'jo_new.remove(l_keys(i));';
         bdy := bdy || nlttttt || 'end if;';
         bdy := bdy || nltttt || 'end loop;';
         bdy := bdy || nltttt || 'if jo_new.get_size = 0 then';
         bdy := bdy || nlttttt || 'return json_object_t();';
         bdy := bdy || nltttt || 'else';
-        bdy := bdy || nlttttt || 'diff.put(''mode'', ''update'');';
-        bdy := bdy || nlttttt || 'diff.put(''old'', jo_old);';
-        bdy := bdy || nlttttt || 'diff.put(''new'', jo_new);';
+        bdy := bdy || nlttttt || ret_val || '.put(''mode'', ''update'');';
+        bdy := bdy || nlttttt || ret_val || '.put(''old'', jo_old);';
+        bdy := bdy || nlttttt || ret_val || '.put(''new'', jo_new);';
         bdy := bdy || nltttt || 'end if;';
         bdy := bdy || nlttt || 'end;';
         bdy := bdy || nlttt || 'return ' || ret_val || ';';
@@ -979,14 +1040,14 @@ create or replace package body tapir is
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_redo(p_only_header in boolean) return str is
+    function tapi_redo(p_only_header in boolean) return clob is
         doc      constant str := tab || '/**' || nlt ||
                                  '* Returns a JSON String containing all columns with different values.' || nlt ||
                                  '* For every contained column, the char representation of the values of both records are included.' || nlt || '*/';
         prc_name constant str := 'procedure ' || 'redo';
         param    constant str := params.parameter_prefix || 'diff';
         sig      constant str := prc_name || nlt || '(' || nltt || param || ' in ' || c_type_json_obj || nlt || ')';
-        bdy str;
+        bdy clob;
     begin
         if params.proc_redo is null or params.proc_of_json is null then
             return null;
@@ -1000,13 +1061,13 @@ create or replace package body tapir is
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_undo(p_only_header in boolean) return str is
+    function tapi_undo(p_only_header in boolean) return clob is
         doc str := tab || '/**' || nlt || '* Returns a JSON String containing all columns with different values.' || nlt ||
                    '* For every contained column, the char representation of the values of both records are included.' || nlt || '*/';
         prc_name constant str := 'procedure ' || 'undo';
         param    constant str := params.parameter_prefix || 'diff';
         sig      constant str := prc_name || nlt || '(' || nltt || param || ' in ' || c_type_json_obj || nlt || ')';
-        bdy str;
+        bdy clob;
     begin
         if params.proc_undo is null or params.proc_of_json is null then
             return null;
@@ -1025,7 +1086,7 @@ create or replace package body tapir is
         p_cons        in tab_cols_t,
         p_only_header in boolean,
         p_suffix      in varchar2 default null
-    ) return str is
+    ) return clob is
         doc      constant str := tab || '/**' || nlt || '* Counts the rows.' || nlt || '*/';
         prc_name constant str := 'function ' || params.proc_count || p_suffix;
         sig constant str := lower(prc_name) || nlt || '(' || nltt ||
@@ -1035,7 +1096,7 @@ create or replace package body tapir is
                                  ' result_cache'
                             end;
         l_var    constant str := 'l_row_count';
-        bdy str;
+        bdy clob;
     begin
         if p_only_header then
             return nll || doc || nlt || sig || ';';
@@ -1061,12 +1122,12 @@ create or replace package body tapir is
         p_only_header in boolean,
         p_suffix      in varchar2 default null,
         p_for_update  in boolean default false
-    ) return str is
+    ) return clob is
         doc      constant str := tab || '/**' || doc_sel || doc_sel_lock(p_for_update) || doc_sel_result_cache ||
                                  doc_sel_null_check || doc_sel_no_data_found || nlt || '*/';
         prc_name constant str := 'function ' || case
                                      when p_for_update then
-                                      params.proc_lock_record
+                                      params.concurrency_control.proc_lock_record
                                      else
                                       params.proc_select
                                  end || p_suffix;
@@ -1077,9 +1138,9 @@ create or replace package body tapir is
                                  ' result_cache'
                             end;
         l_row    constant str := 'l_' || param_name_row;
-        bdy str;
+        bdy clob;
     begin
-        if params.proc_lock_record is null then
+        if params.concurrency_control.proc_lock_record is null then
             return null;
         elsif p_only_header then
             return nll || doc || nlt || sig || ';';
@@ -1109,31 +1170,32 @@ create or replace package body tapir is
         p_cons        in tab_cols_t,
         p_only_header in boolean,
         p_suffix      in varchar2 default null
-    ) return str is
+    ) return clob is
         doc       constant str := tab || '/**' || doc_sel || nlt ||
                                   '* Also captures the checksum of the record for later to perform an optimistic write lock check prior modifying the record in DB.' ||
                                   doc_sel_result_cache || doc_sel_null_check || doc_sel_no_data_found || nlt || '*/';
-        prc_name  constant str := 'function ' || params.proc_select || p_suffix || occ_name_suffix;
+        prc_name  constant str := 'function ' || params.proc_select || p_suffix || opt_lock_suffix;
         sig       constant str := lower(prc_name) || nlt || '(' || nltt ||
                                   str_join(stringf(p_cons, tag_sig_param || ' in ' || tag_type), ',' || nltt) || nlt ||
-                                  ') return ' || type_rt_name_occ;
-        l_var_occ constant str := 'l_' || param_name_row || occ_name_suffix;
-        cur_name  constant str := cursor_prefix || coalesce(p_suffix, cursor_suffix_pk) || occ_name_suffix;
-        bdy str;
+                                  ') return ' || type_rt_name_check;
+        l_var_occ constant str := 'l_' || param_name_row || cur_checksum_name_suffix;
+        cur_name  constant str := cursor_prefix || coalesce(p_suffix, cursor_suffix_pk) || cur_checksum_name_suffix;
+        bdy clob;
     begin
-        if not priv_to_dbms_crypto or not params.create_occ_procedures then
+        if not priv_to_dbms_crypto or not params.concurrency_control.opt_lock_generate or
+           params.concurrency_control.row_version_column is not null then
             return null;
         elsif p_only_header then
             return nll || doc || nlt || sig || ';';
         end if;
     
         bdy := nll || tab || sig || ' is';
-        bdy := bdy || nltt || l_var_occ || ' ' || type_rt_name_occ || ';';
+        bdy := bdy || nltt || l_var_occ || ' ' || type_rt_name_check || ';';
         bdy := bdy || nlt || 'begin';
         bdy := bdy || case
                    when params.check_pk_values_before_select then
                     nltt ||
-                    str_join(stringf(p_cons, proc_name_raise_if_null || '(' || tag_param || ', ''' || tag_col || ''');'),
+                    str_join(stringf(p_cons, proc_name_assert_not_null || '(' || tag_param || ', ''' || tag_col || ''');'),
                              nltt) || nl
                end;
         bdy := bdy || nltt || 'open ' || cur_name || '(' || str_join(stringf(p_cons, tag_param), ', ') || ');';
@@ -1150,7 +1212,7 @@ create or replace package body tapir is
         p_only_header in boolean,
         p_suffix      in varchar2 default null,
         p_for_update  in boolean default false
-    ) return str is
+    ) return clob is
         doc constant str := tab || '/**' || nlt || '* Returns true, if the row exists, false otherwise.' || nlt ||
                             '* If the record exists, the function will return the record as an output parameter' || case
                                 when p_for_update then
@@ -1169,7 +1231,7 @@ create or replace package body tapir is
                                     when p_for_update then
                                      '_lock'
                                 end;
-        bdy str;
+        bdy clob;
     begin
         if p_only_header then
             return nll || doc || nlt || sig || ';';
@@ -1181,7 +1243,7 @@ create or replace package body tapir is
         bdy := bdy || case
                    when params.check_pk_values_before_select then
                     nltt ||
-                    str_join(stringf(p_cons, proc_name_raise_if_null || '(' || tag_param || ', ''' || tag_col || ''');'),
+                    str_join(stringf(p_cons, proc_name_assert_not_null || '(' || tag_param || ', ''' || tag_col || ''');'),
                              nltt) || nl
                end;
         bdy := bdy || nltt || 'open ' || cur_idx || '(' || str_join(stringf(p_cons, tag_param), ', ') || ');';
@@ -1193,13 +1255,13 @@ create or replace package body tapir is
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_exists_rt(p_only_header in boolean) return str is
+    function tapi_exists_rt(p_only_header in boolean) return clob is
         doc      constant str := tab || '/**' || nlt || '* Returns true, if the record exists, false otherwise.' || nlt || '*/';
         prc_name constant str := 'function ' || params.proc_exists;
         param    constant str := params.parameter_prefix || param_name_row;
         sig      constant str := prc_name || nlt || '(' || nltt || param || ' in ' || type_rt_name || nlt ||
                                  ') return boolean';
-        bdy str;
+        bdy clob;
     begin
         if p_only_header then
             return nll || doc || nlt || sig || ';';
@@ -1216,72 +1278,69 @@ create or replace package body tapir is
     (
         p_param_name in varchar2,
         p_without_pk in boolean default false
-    ) return str is
-        bdy         str;
-        exc_handler str;
+    ) return clob is
+        bdy               clob;
+        exc_handler       str_list := str_list();
     begin
-        if not is_log_dup_val_on_index or params.log_exception_procedure is null then
-            return null;
-        end if;
-    
-        bdy := nltt || 'when dup_val_on_index then';
-        for idx in 1 .. g_cons.count loop
-            if (p_without_pk and g_cons(idx).c_type = 'P') or g_cons(idx).c_type = 'N' then
+        for i in 1 .. g_cons.count loop
+            if (p_without_pk and g_cons(i).c_type = 'P') or g_cons(i).c_type = 'N' then
                 continue;
             end if;
-        
-            declare
-                l_cons_cols tab_cols_t := read_cons_cols(g_cons(idx).c_name);
-            begin
-                exc_handler := exc_handler || nltttt || 'when instr(lower(sqlerrm), ''' || lower(g_cons(idx).c_name) ||
-                               ''') > 0 then';
-                exc_handler := exc_handler || nlttttt ||
-                               log_exception('sqlerrm || '': '' || ' || proc_name_pk_string || '(' || p_param_name || ')');
-                exc_handler := exc_handler || nlttttt ||
-                               log_exception(params.proc_diff || '(' || params.proc_select || g_cons(idx).c_suffix || '(' ||
-                                             str_join(stringf(l_cons_cols, col_rec(p_param_name)), ', ') || '), ' ||
+            exc_handler.extend;
+            exc_handler(exc_handler.last) := 'when instr(lower(sqlerrm), ''' || lower(g_cons(i).c_name) || ''') > 0 then';
+            exc_handler.extend;
+            exc_handler(exc_handler.last) := tab || log_exception('sqlerrm || '': '' || ' || proc_name_pk_string || '(' ||
+                                             p_param_name || ')');
+            exc_handler.extend;
+            exc_handler(exc_handler.last) := tab || log_exception(params.proc_diff || '(' || params.proc_select || g_cons(i).c_suffix || '(' ||
+                                             str_join(stringf(read_cons_cols(g_cons(i).c_name), col_rec(p_param_name)), ', ') || '), ' ||
                                              p_param_name || ')' || '.to_string');
-            end;
         end loop;
     
-        bdy := bdy || concat_if_not_null(nlttt || 'case', exc_handler, nlttt || 'end case;');
-        return bdy || nlttt || 'raise;';
+        if exc_handler.count > 0 then
+            bdy := nltt || 'when dup_val_on_index then';
+            bdy := bdy || nlttt || 'case';
+            bdy := bdy || nltttt || str_join(exc_handler, nltttt);
+            bdy := bdy || nlttt || 'end case;';
+            return bdy || nlttt || 'raise;';
+        else
+            return null;
+        end if;
     end;
 
     function exceptions_forall
     (
         rows_var   in str,
         errors_var in str,
-        ret_rows   in str
-    ) return str is
-        bdy str;
+        ret_rows   in str default null
+    ) return clob is
+        bdy clob;
     begin
         if params.log_exception_procedure is null then
             return null;
         end if;
-
+    
         bdy := bdy || nlt || 'exception';
-        bdy := bdy || nltt || 'when forall_error';
-        bdy := bdy || nltt || 'then';
-        bdy := bdy || nlttt || 'for idx in 1 .. sql%bulk_exceptions.count';
-        bdy := bdy || nlttt || 'loop';
+        bdy := bdy || nltt || 'when forall_error then';
+        bdy := bdy || nlttt || 'for i in 1 .. sql%bulk_exceptions.count loop';
         bdy := bdy || nltttt || errors_var || '.extend;';
         bdy := bdy || nltttt || errors_var || '(' || errors_var || '.last' || ') := ' || rows_var ||
-               '(sql%bulk_exceptions(idx).error_index);';
+               '(sql%bulk_exceptions(i).error_index);';
         bdy := bdy || case
                    when params.log_exception_procedure is not null then
-                    nltttt || log_exception('sqlerrm(-sql%bulk_exceptions(idx).error_code)')
+                    nltttt || log_exception('sqlerrm(-sql%bulk_exceptions(i).error_code)')
                end;
         bdy := bdy || nlttt || 'end loop;';
-        return bdy || nlttt || 'return ' || ret_rows || ';';
+        return bdy || case when ret_rows is not null then nlttt || 'return ' || ret_rows || ';' end;
     end;
 
-    function tapi_update_rt(p_only_header in boolean) return str is
+    function tapi_update_rt(p_only_header in boolean) return clob is
         doc      constant str := tab || '/**' || nlt || ' * Updates the row with the modified values.' || nlt || ' */';
         prc_name constant str := 'procedure ' || params.proc_update;
         param    constant str := params.parameter_prefix || param_name_row;
         sig      constant str := prc_name || nlt || '(' || nltt || param || ' in out nocopy ' || type_rt_name || nlt || ')';
-        bdy str;
+        l_column_not_changed str_list;
+        bdy                  clob;
     begin
         if p_only_header then
             return nll || doc || nlt || sig || ';';
@@ -1291,23 +1350,23 @@ create or replace package body tapir is
         bdy := bdy || nlt || 'begin';
         bdy := bdy || nltt ||
                str_join(stringf(g_pk_cols,
-                                proc_name_raise_if_null || '(' || col_rec(param) || ', ''' || tag_col || ''');'),
-                        nltt) || nl;
+                                proc_name_assert_not_null || '(' || col_rec(param) || ', ''' || tag_col || ''');'),
+                        nltt);
+        bdy := bdy || nl;
         bdy := bdy || nltt || 'update ' || table_name() || ' t';
         bdy := bdy || nltt || '   set ' || str_join(stringf(exclude(non_pk(changables), g_audit_cols_created),
                                                             col_quote('t.') || ' = ' || col_default(col_rec(param))),
                                                     ',' || nltt || '       ');
         bdy := bdy || nltt || ' where ' ||
-               str_join(str_list(str_join(stringf(g_pk_cols, col_quote('t.') || ' = ' || col_rec(param)),
-                                          nltt || '   and '),
-                                 str_join(stringf(non_pk(comparables), not_equal_exp(col_quote('t.'), col_rec(param))),
-                                          nltt || '        or ')),
-                        nltt || '   and    (');
-        bdy := bdy || concat_if_not_null(nltt || '        or ',
-                                         str_join(stringf(include(g_cols, lob_types),
-                                                          not_equal_exp(col_quote('t.'), col_rec(param), c_type_blob)),
-                                                  nltt || '        or '));
-        bdy := bdy || ')';
+               str_join(stringf(g_pk_cols, col_quote('t.') || ' = ' || col_rec(param)), nltt || '   and ');
+    
+        l_column_not_changed := str_join(stringf(non_pk(comparables), not_equal_exp(col_quote('t.'), col_rec(param))),
+                                         stringf(include(g_cols, lob_types),
+                                                 not_equal_exp(col_quote('t.'), col_rec(param), c_type_blob)));
+        if l_column_not_changed.count > 0 then
+            bdy := bdy || nltt || '   and    (' || str_join(l_column_not_changed, nltt || '        or ') || ')';
+        end if;
+    
         bdy := bdy || nltt || 'returning ' || str_join(stringf(g_cols, col_quote('t.')), ', ') || ' into ' || param || ';';
         if with_cloud_events then
             bdy := bdy || nltt || proc_name_emit_cloud_event || '(''update'', $$plsql_unit, ' || name_proc_json_obj || '(' ||
@@ -1324,63 +1383,120 @@ create or replace package body tapir is
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_update_occ(p_only_header in boolean) return str is
+    function tapi_update_occ(p_only_header in boolean) return clob is
         doc      constant str := tab || '/**' || nlt || '* Updates the row with the modified values.' || nlt || '*/';
-        prc_name constant str := 'procedure ' || params.proc_update || occ_name_suffix;
+        prc_name constant str := 'procedure ' || params.proc_update || opt_lock_suffix;
         param    constant str := params.parameter_prefix || param_name_row;
-        sig      constant str := prc_name || nlt || '(' || nltt || param || ' in out nocopy ' || type_rt_name_occ || nlt || ')';
-        l_cur    constant str := cursor_prefix || '_' || 'pk' || occ_name_suffix;
-        l_var    constant str := 'l_' || param_name_row;
-        bdy str;
+        sig constant str := prc_name || nlt || '(' || nltt || param || ' in out nocopy ' || case
+                                when params.concurrency_control.row_version_column is not null then
+                                 type_rt_name
+                                else
+                                 type_rt_name_check
+                            end || nlt || ')';
+        bdy clob;
     begin
-        if not priv_to_dbms_crypto or not params.create_occ_procedures then
+        if not priv_to_dbms_crypto or not params.concurrency_control.opt_lock_generate then
             return null;
         elsif p_only_header then
             return nll || doc || nlt || sig || ';';
         end if;
     
         bdy := nll || tab || sig || ' is';
-        bdy := bdy || nltt || l_var || ' ' || type_rt_name_occ || ';';
         bdy := bdy || nlt || 'begin';
-        bdy := bdy || nltt || 'open ' || l_cur || '(' || str_join(stringf(g_pk_cols, col_rec(param)), ', ') || ');';
-        bdy := bdy || nltt || 'fetch ' || l_cur;
-        bdy := bdy || nltt || ' into ' || l_var || ';';
+        bdy := bdy || nltt ||
+               str_join(stringf(g_pk_cols,
+                                proc_name_assert_not_null || '(' || col_rec(param) || ', ''' || tag_col || ''');'),
+                        nltt);
+        if params.concurrency_control.row_version_column is not null then
+            bdy := bdy || nltt || proc_name_assert_not_null || '(' || param || '.' ||
+                   lower(params.concurrency_control.row_version_column) || ', ''' ||
+                   lower(params.concurrency_control.row_version_column) || ''');';
+        end if;
         bdy := bdy || nl;
-        bdy := bdy || nltt || 'if ' || l_cur || '%notfound';
-        bdy := bdy || nltt || 'then';
-        bdy := bdy || nlttt || 'close ' || l_cur || ';';
-        bdy := bdy || nlttt ||
-               'raise_application_error(-20000, ''Update operation failed because the row is no longer in the database.'');';
-        bdy := bdy || nltt || 'elsif ' || param || '.' || params.proc_checksum || ' != ' || l_var || '.' ||
-               params.proc_checksum;
-        bdy := bdy || nltt || 'then';
-        bdy := bdy || nlttt || 'close ' || l_cur || ';';
-        bdy := bdy || nlttt ||
-               'raise_application_error(-20000, ''Current version of data in database has changed since last page refresh.'');';
-        bdy := bdy || nltt || 'end if;' || nl;
         bdy := bdy || nltt || 'update ' || table_name() || ' t';
         bdy := bdy || nltt || '   set ' || str_join(stringf(exclude(non_pk(changables), g_audit_cols_created),
-                                                            col_quote('t.') || ' = ' || col_rec(param)),
-                                                    nltt || '      ,');
+                                                            col_quote('t.') || ' = ' || col_default(col_rec(param))),
+                                                    ',' || nltt || '       ');
         bdy := bdy || nltt || ' where ' ||
                str_join(stringf(g_pk_cols, col_quote('t.') || ' = ' || col_rec(param)), nltt || '   and ');
-        bdy := bdy || nltt || 'returning ' || str_join(stringf(g_cols, col_quote('t.')), ', ') || ', ' || tapi_name || '.' ||
-               params.proc_checksum || '(' ||
-               str_join(stringf(non_audit, col_quote('t.')),
-                        nltt || '       ' || indent(tapi_name || '.' || params.proc_checksum) || ',') || ')' ||
-               ' into ' || param || ';';
-        bdy := bdy || nltt || 'close ' || l_cur || ';';
+        if params.concurrency_control.row_version_column is not null then
+            bdy := bdy || nltt || '   and ' || 't.' || lower(params.concurrency_control.row_version_column) || ' = ' ||
+                   param || '.' || lower(params.concurrency_control.row_version_column);
+        else
+            bdy := bdy || nltt || '   and ' || tapi_name || '.' || params.proc_checksum || '(' ||
+                   str_join(stringf(non_audit, col_quote('t.')), ', ') || ') = ' || param || '.' ||
+                   params.proc_checksum;
+        end if;
+        bdy := bdy || nltt || 'returning ' || str_join(stringf(g_cols, col_quote('t.')), ', ');
+        if params.concurrency_control.row_version_column is null then
+            bdy := bdy || ',' || nltt || '          ' || tapi_name || '.' || params.proc_checksum || '(' ||
+                   str_join(stringf(non_audit, col_quote('t.')), ', ') || ')';
+        end if;
+        bdy := bdy || ' into ' || param || ';';
+        bdy := bdy || nltt || 'if sql%rowcount = 0 then';
+        bdy := bdy || nlttt ||
+               'raise_application_error(-20000, ''Current version of data in database has changed since last read.'');';
+        bdy := bdy || nltt || 'end if;';
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_insert_rt_func(p_only_header in boolean) return str is
+    function tapi_delete_occ(p_only_header in boolean) return clob is
+        doc      constant str := tab || '/**' || nlt || '* Updates the row with the modified values.' || nlt || '*/';
+        prc_name constant str := 'procedure ' || params.proc_delete || opt_lock_suffix;
+        param    constant str := params.parameter_prefix || param_name_row;
+        sig constant str := prc_name || nlt || '(' || nltt || param || ' in ' || case
+                                when params.concurrency_control.row_version_column is not null then
+                                 type_rt_name
+                                else
+                                 type_rt_name_check
+                            end || nlt || ')';
+        bdy clob;
+    begin
+        if not priv_to_dbms_crypto or not params.concurrency_control.opt_lock_generate then
+            return null;
+        elsif p_only_header then
+            return nll || doc || nlt || sig || ';';
+        end if;
+    
+        bdy := nll || tab || sig || ' is';
+        bdy := bdy || nlt || 'begin';
+        bdy := bdy || nltt ||
+               str_join(stringf(g_pk_cols,
+                                proc_name_assert_not_null || '(' || col_rec(param) || ', ''' || tag_col || ''');'),
+                        nltt);
+        if params.concurrency_control.row_version_column is not null then
+            bdy := bdy || nltt || proc_name_assert_not_null || '(' || param || '.' ||
+                   lower(params.concurrency_control.row_version_column) || ', ''' ||
+                   lower(params.concurrency_control.row_version_column) || ''');';
+        end if;
+        bdy := bdy || nl;
+        bdy := bdy || nltt || 'delete ' || table_name() || ' t';
+        bdy := bdy || nltt || ' where ' ||
+               str_join(stringf(g_pk_cols, col_quote('t.') || ' = ' || col_rec(param)), nltt || '   and ');
+        if params.concurrency_control.row_version_column is not null then
+            bdy := bdy || nltt || '   and ' || 't.' || lower(params.concurrency_control.row_version_column) || ' = ' ||
+                   param || '.' || lower(params.concurrency_control.row_version_column);
+        else
+            bdy := bdy || nltt || '   and ' || tapi_name || '.' || params.proc_checksum || '(' ||
+                   str_join(stringf(non_audit, col_quote('t.')), ', ') || ') = ' || param || '.' ||
+                   params.proc_checksum;
+        end if;
+        bdy := bdy || ';';
+        bdy := bdy || nltt || 'if sql%notfound then';
+        bdy := bdy || nlttt ||
+               'raise_application_error(-20000, ''Current version of data in database has changed since last read.'');';
+        bdy := bdy || nltt || 'end if;';
+        return bdy || nlt || 'end;';
+    end;
+
+    function tapi_insert_rt_func(p_only_header in boolean) return clob is
         doc      constant str := tab || '/**' || nlt || '* Inserts a row into the table.' || nlt || '*/';
         prc_name constant str := 'function ' || params.proc_insert;
         param    constant str := params.parameter_prefix || param_name_row;
         sig      constant str := prc_name || nlt || '(' || nltt || param || ' in ' || type_rt_name || nlt ||
                                  ') return ' || type_rt_name;
         l_var    constant str := 'ret_val';
-        bdy        str;
+        bdy        clob;
         pk_non_def tab_cols_t := tab_cols_t();
     begin
         if p_only_header then
@@ -1390,23 +1506,22 @@ create or replace package body tapir is
         bdy := nll || tab || sig || ' is';
         bdy := bdy || nltt || l_var || ' ' || type_rt_name || ' := ' || param || ';';
         bdy := bdy || nlt || 'begin';
-        for idx in 1 .. g_pk_cols.count loop
-            if g_pk_cols(idx).data_default is null then
+        for i in 1 .. g_pk_cols.count loop
+            if g_pk_cols(i).data_default is null then
                 pk_non_def.extend();
-                pk_non_def(pk_non_def.last) := g_pk_cols(idx);
+                pk_non_def(pk_non_def.last) := g_pk_cols(i);
             end if;
         end loop;
     
-        bdy := bdy || concat_if_not_null(nltt,
-                                         str_join(stringf(pk_non_def,
-                                                          proc_name_raise_if_null || '(' || col_rec(param) || ', ''' ||
-                                                          tag_col || ''');'),
-                                                  nltt),
-                                         nl);
+        bdy := bdy || nltt ||
+               str_join(stringf(pk_non_def,
+                                proc_name_assert_not_null || '(' || col_rec(param) || ', ''' || tag_col || ''');'),
+                        nltt);
+        bdy := bdy || nl;
         bdy := bdy || nltt || 'insert into ' || table_name() || ' t';
-        bdy := bdy || nlttt || '(' || str_join(stringf(changables, col_quote('t.')), ',' || nlttt) || ')';
+        bdy := bdy || nlttt || '(' || str_join(stringf(changables, col_quote('t.')), ',' || nlttt || ' ') || ')';
         bdy := bdy || nltt || 'values';
-        bdy := bdy || nlttt || '(' || str_join(stringf(changables, col_default(col_rec(param))), ',' || nlttt) || ')';
+        bdy := bdy || nlttt || '(' || str_join(stringf(changables, col_default(col_rec(param))), ',' || nlttt || ' ') || ')';
         bdy := bdy || nltt || 'returning ' || str_join(stringf(g_cols, col_quote('t.')), ', ') || ' into ' || l_var || ';';
         if with_cloud_events then
             bdy := bdy || nltt || proc_name_emit_cloud_event || '(''insert'', $$plsql_unit, ' || name_proc_json_obj || '(' ||
@@ -1424,12 +1539,12 @@ create or replace package body tapir is
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_insert_rt_proc(p_only_header in boolean) return str is
+    function tapi_insert_rt_proc(p_only_header in boolean) return clob is
         doc      constant str := tab || '/**' || nlt || '* Inserts a row into the table.' || nlt || '*/';
         prc_name constant str := 'procedure ' || params.proc_insert;
         param    constant str := params.parameter_prefix || param_name_row;
         sig      constant str := prc_name || nlt || '(' || nltt || param || ' in out nocopy ' || type_rt_name || nlt || ')';
-        bdy str;
+        bdy clob;
     begin
         if p_only_header then
             return nll || doc || nlt || sig || ';';
@@ -1441,12 +1556,12 @@ create or replace package body tapir is
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_subtype_defaults(p_only_header in boolean) return str is
+    function tapi_subtype_defaults(p_only_header in boolean) return clob is
         doc      constant str := tab || '/**' || nlt || '* Returns a record with defaults as defined.' || nlt || '*/';
         prc_name constant str := 'function ' || type_rt_name || '_defaults';
         l_var    constant str := 'l_' || param_name_row;
         sig str;
-        bdy str;
+        bdy clob;
     begin
         if params.defaults.init_record_expressions.count = 0 then
             return null;
@@ -1468,13 +1583,13 @@ create or replace package body tapir is
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_exists_select_rt(p_only_header in boolean) return str is
+    function tapi_exists_select_rt(p_only_header in boolean) return clob is
         doc      constant str := tab || '/**' || nlt || '* Returns true, if the row exists, false otherwise.' || nlt || '*/';
         prc_name constant str := 'function ' || params.proc_exists_and_select;
         param    constant str := params.parameter_prefix || param_name_row;
         sig      constant str := prc_name || nlt || '(' || nltt || param || ' in out nocopy ' || type_rt_name || nlt ||
                                  ') return boolean';
-        bdy str;
+        bdy clob;
     begin
         if p_only_header then
             return nll || doc || nlt || sig || ';';
@@ -1495,21 +1610,21 @@ create or replace package body tapir is
     (
         p_only_header in boolean,
         p_for_update  in boolean default false
-    ) return str is
+    ) return clob is
         doc      constant str := tab || '/**' || doc_sel || doc_sel_lock(p_for_update) || doc_sel_result_cache ||
                                  doc_sel_null_check || doc_sel_no_data_found || nlt || '*/';
         prc_name constant str := 'function ' || case
                                      when p_for_update then
-                                      params.proc_lock_record
+                                      params.concurrency_control.proc_lock_record
                                      else
                                       params.proc_select
                                  end;
         param    constant str := params.parameter_prefix || param_name_row;
         sig      constant str := prc_name || nlt || '(' || nltt || param || ' in ' || type_rt_name || nlt ||
                                  ') return ' || type_rt_name;
-        bdy str;
+        bdy clob;
     begin
-        if params.proc_lock_record is null then
+        if params.concurrency_control.proc_lock_record is null then
             return null;
         elsif p_only_header then
             return nll || doc || nlt || sig || ';';
@@ -1519,7 +1634,7 @@ create or replace package body tapir is
         bdy := bdy || nlt || 'begin';
         bdy := bdy || nltt || 'return ' || case
                    when p_for_update then
-                    params.proc_lock_record
+                    params.concurrency_control.proc_lock_record
                    else
                     params.proc_select
                end || '(' || str_join(stringf(g_pk_cols, col_rec(param)), ', ') || ');';
@@ -1530,20 +1645,20 @@ create or replace package body tapir is
     (
         p_only_header in boolean,
         p_for_update  in boolean default false
-    ) return str is
+    ) return clob is
         doc      constant str := tab || '/**' || doc_sel || doc_sel_lock(p_for_update) || doc_sel_result_cache ||
                                  doc_sel_null_check || doc_sel_no_data_found || nlt || '*/';
         prc_name constant str := 'procedure ' || case
                                      when p_for_update then
-                                      params.proc_lock_record
+                                      params.concurrency_control.proc_lock_record
                                      else
                                       params.proc_select
                                  end;
         param    constant str := params.parameter_prefix || param_name_row;
         sig      constant str := prc_name || nlt || '(' || nltt || param || ' in out nocopy ' || type_rt_name || nlt || ')';
-        bdy str;
+        bdy clob;
     begin
-        if params.proc_lock_record is null then
+        if params.concurrency_control.proc_lock_record is null then
             return null;
         elsif p_only_header then
             return nll || doc || nlt || sig || ';';
@@ -1553,21 +1668,21 @@ create or replace package body tapir is
         bdy := bdy || nlt || 'begin';
         bdy := bdy || nltt || param || ' := ' || case
                    when p_for_update then
-                    params.proc_lock_record
+                    params.concurrency_control.proc_lock_record
                    else
                     params.proc_select
                end || '(' || str_join(stringf(g_pk_cols, col_rec(param)), ', ') || ');';
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_print_rt(p_only_header in boolean default false) return str is
+    function tapi_print_rt(p_only_header in boolean default false) return clob is
         doc      constant str := tab || '/**' || nlt || '* Prints out all fieldnames and values of the record.' || nlt || '*/';
-        prc_name constant str := 'procedure ' || params.proc_print;
+        prc_name constant str := 'procedure ' || params.print_proc.proc_print;
         param    constant str := params.parameter_prefix || param_name_row;
         sig      constant str := prc_name || nlt || '(' || nltt || param || ' in ' || type_rt_name || nlt || ')';
-        bdy str;
+        bdy clob;
     begin
-        if params.log_exception_procedure is null then
+        if params.print_proc.proc_print is null or params.print_proc.print_function is null then
             return null;
         elsif p_only_header then
             return nll || doc || nlt || sig || ';';
@@ -1575,20 +1690,22 @@ create or replace package body tapir is
     
         bdy := nll || tab || sig || ' is';
         bdy := bdy || nlt || 'begin';
-        bdy := bdy || nltt ||
-               str_join(stringf(g_cols, log_exception('''' || tag_col || ' = '' || ' || col_char(col_rec(param)))),
-                        nltt);
+        bdy := bdy || nltt || str_join(stringf(g_cols,
+                                               regexp_replace('''' || tag_col || ' = '' || ' || col_char(col_rec(param)),
+                                                              '^(.*)$',
+                                                              params.print_proc.print_function) || ';'),
+                                       nltt);
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_to_string_rt(p_only_header in boolean default false) return str is
+    function tapi_to_string_rt(p_only_header in boolean default false) return clob is
         doc      constant str := tab || '/**' || nlt ||
                                  '* Returns a string representation of the concatenated primary key values.' || nlt || '*/';
         prc_name constant str := 'function ' || proc_name_pk_string;
         param    constant str := params.parameter_prefix || param_name_row;
         sig      constant str := prc_name || nlt || '(' || nltt || param || ' in ' || type_rt_name || nlt ||
                                  ') return varchar2';
-        bdy str;
+        bdy clob;
     begin
         if p_only_header then
             return nll || doc || nlt || sig || ';';
@@ -1602,13 +1719,13 @@ create or replace package body tapir is
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_json_obj(p_only_header in boolean default false) return str is
+    function tapi_json_obj(p_only_header in boolean default false) return clob is
         doc      constant str := tab || '/**' || nlt || '* Returns a stringified JSON of the record.' || nlt || '*/';
         prc_name constant str := 'function ' || name_proc_json_obj;
         param    constant str := params.parameter_prefix || param_name_row;
         sig      constant str := prc_name || nlt || '(' || nltt || param || ' in ' || type_rt_name || nlt ||
                                  ') return ' || c_type_json_obj;
-        bdy str;
+        bdy clob;
     begin
         if params.proc_json_obj is null and not is_create_diff then
             return null;
@@ -1654,13 +1771,13 @@ create or replace package body tapir is
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_json_arr(p_only_header in boolean default false) return str is
+    function tapi_json_arr(p_only_header in boolean default false) return clob is
         doc      constant str := tab || '/**' || nlt || '* Returns a stringified JSON of the record.' || nlt || '*/';
         prc_name constant str := 'function ' || 'json' || '_arr';
         param    constant str := params.parameter_prefix || 'rows';
         sig      constant str := prc_name || nlt || '(' || nltt || param || ' in ' || type_rows_tab || nlt ||
                                  ') return json_array_t';
-        bdy str;
+        bdy clob;
     begin
         if params.proc_json_obj is null then
             return null;
@@ -1669,12 +1786,12 @@ create or replace package body tapir is
         end if;
     
         bdy := nll || tab || sig || ' is';
-        bdy := bdy || nltt || 'idx pls_integer := ' || param || '.first;';
+        bdy := bdy || nltt || 'i pls_integer := ' || param || '.first;';
         bdy := bdy || nltt || 'ja  json_array_t := json_array_t;';
         bdy := bdy || nlt || 'begin';
-        bdy := bdy || nltt || 'while idx is not null loop';
-        bdy := bdy || nlttt || 'ja.append(' || name_proc_json_obj || '(' || param || '(idx)));';
-        bdy := bdy || nlttt || 'idx := ' || param || '.next(idx);';
+        bdy := bdy || nltt || 'while i is not null loop';
+        bdy := bdy || nlttt || 'ja.append(' || name_proc_json_obj || '(' || param || '(i)));';
+        bdy := bdy || nlttt || 'i := ' || param || '.next(i);';
         bdy := bdy || nltt || 'end loop;';
         bdy := bdy || nltt || 'return ja;';
         return bdy || nlt || 'end;';
@@ -1694,9 +1811,14 @@ create or replace package body tapir is
     
         bdy := nll || tab || sig || ' is';
         bdy := bdy || nlt || 'begin';
+        bdy := bdy || nltt ||
+               str_join(stringf(g_pk_cols,
+                                proc_name_assert_not_null || '(' || col_rec(param) || ', ''' || tag_col || ''');'),
+                        nltt);
+        bdy := bdy || nl;
         bdy := bdy || nltt || 'merge into ' || table_name() || ' x';
         bdy := bdy || nltt || 'using (select ';
-        bdy := bdy || str_join(stringf(g_cols, col_rec(param) || ' as ' || tag_col), ',' || nltt || '             ');
+        bdy := bdy || str_join(stringf(g_cols, col_rec(param) || ' as ' || tag_col), ',' || nltt || '              ');
         bdy := bdy || nltt || '         from dual) y';
         bdy := bdy || nltt || 'on (' ||
                str_join(stringf(g_pk_cols, col_quote('x.') || ' = ' || col_quote('y.')), ' and ') || ')';
@@ -1709,16 +1831,17 @@ create or replace package body tapir is
         bdy := bdy ||
                concat_if_not_null(nlttt || ' where ',
                                   str_join(stringf(non_pk(comparables), not_equal_exp(col_quote('x.'), col_quote('y.'))),
-                                           nltttt || ' or '));
+                                           nlttt || '    or '));
         bdy := bdy || concat_if_not_null(nlttt || '    or ',
                                          str_join(stringf(include(g_cols, lob_types),
                                                           not_equal_exp(col_quote('x.'), col_quote('y.'), c_type_blob)),
-                                                  nltttt || ' or '));
+                                                  nlttt || '    or '));
         bdy := bdy || nltt || 'when not matched then';
         bdy := bdy || nlttt || 'insert';
-        bdy := bdy || nltttt || '(' || str_join(stringf(changables, col_quote('x.')), ',' || nltttt) || ')';
+        bdy := bdy || nltttt || '(' || str_join(stringf(changables, col_quote('x.')), ',' || nltttt || ' ') || ')';
         bdy := bdy || nlttt || 'values';
-        bdy := bdy || nltttt || '(' || str_join(stringf(changables, col_default(col_quote('y.'))), ',' || nltttt) || ');';
+        bdy := bdy || nltttt || '(' ||
+               str_join(stringf(changables, col_default(col_quote('y.'))), ',' || nltttt || ' ') || ');';
         return bdy || nlt || 'end;';
     end;
 
@@ -1727,7 +1850,7 @@ create or replace package body tapir is
         p_cons        in tab_cols_t,
         p_only_header in boolean default false,
         p_suffix      in varchar2 default null
-    ) return str is
+    ) return clob is
         doc      constant str := tab || '/**' || nlt || '* Returns true, if the record exists, false otherwise.' || nlt || '*/';
         prc_name constant str := 'function ' || params.proc_exists || p_suffix;
         sig constant str := lower(prc_name) || nlt || '(' || nltt ||
@@ -1739,7 +1862,7 @@ create or replace package body tapir is
         l_var    constant str := 'l_' || param_name_row;
         l_exists constant str := 'l_found';
         cur_idx  constant str := cursor_prefix || coalesce(p_suffix, cursor_suffix_pk);
-        bdy str;
+        bdy clob;
     begin
         if p_only_header then
             return nll || doc || nlt || sig || ';';
@@ -1763,11 +1886,11 @@ create or replace package body tapir is
         p_cons        in tab_cols_t,
         p_only_header in boolean default false,
         p_suffix      in varchar2 default null
-    ) return str is
+    ) return clob is
         doc constant str := tab || '/**' || nlt || '* Returns true, if the record exists, false otherwise.' || nlt || '*/';
         prc_name str;
         sig      str;
-        bdy      str;
+        bdy      clob;
     begin
         if params.boolean_pseudo_type.true_value is null or params.boolean_pseudo_type.false_value is null then
             return null;
@@ -1790,12 +1913,12 @@ create or replace package body tapir is
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_delete_rt(p_only_header in boolean) return str is
+    function tapi_delete_rt(p_only_header in boolean) return clob is
         doc      constant str := tab || '/**' || nlt || '* Deletes a row with the same primary key from the table.' || nlt || '*/';
         prc_name constant str := 'procedure ' || params.proc_delete;
         param    constant str := params.parameter_prefix || param_name_row;
         sig      constant str := prc_name || nlt || '(' || nltt || param || ' in ' || type_rt_name || nlt || ')';
-        bdy str;
+        bdy clob;
     begin
         if p_only_header then
             return nll || doc || nlt || sig || ';';
@@ -1812,12 +1935,12 @@ create or replace package body tapir is
         p_cons        in tab_cols_t,
         p_only_header in boolean,
         p_suffix      in varchar2 default null
-    ) return str is
+    ) return clob is
         doc      constant str := tab || '/**' || nlt || '* Deletes a row with the same primary key from the table.' || nlt || '*/';
         prc_name constant str := 'procedure del' || p_suffix;
         sig      constant str := lower(prc_name) || nlt || '(' || nltt ||
                                  str_join(stringf(p_cons, tag_sig_param || ' in ' || tag_type), ',' || nltt) || nlt || ')';
-        bdy str;
+        bdy clob;
     begin
         if p_only_header then
             return nll || doc || nlt || sig || ';';
@@ -1828,7 +1951,7 @@ create or replace package body tapir is
         bdy := bdy || case
                    when params.check_pk_values_before_select then
                     nltt ||
-                    str_join(stringf(p_cons, proc_name_raise_if_null || '(' || tag_param || ', ''' || tag_col || ''');'),
+                    str_join(stringf(p_cons, proc_name_assert_not_null || '(' || tag_param || ', ''' || tag_col || ''');'),
                              nltt) || nl
                end;
         bdy := bdy || nltt || 'delete ' || table_name() || ' t';
@@ -1843,18 +1966,18 @@ create or replace package body tapir is
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_select_rows(p_only_header in boolean default false) return str is
+    function tapi_select_rows(p_only_header in boolean default false) return clob is
         doc      constant str := tab || '/**' || nlt || '* Returns the records captured by the ref cursor.' || nlt ||
                                  '* If more than the limited number of records exist, the functions has to be called as long as the return table is empty.' || nlt ||
                                  '* When the ref cursor doesn''t return any more rows, it is automacally closed.' || nlt || '*/';
-        prc_name constant str := 'function ' || params.proc_select || '_rows';
+        prc_name constant str := 'function ' || params.proc_select || bulk_proc_suffix;
         p_cursor constant str := params.parameter_prefix || 'ref_cursor';
         p_limit  constant str := params.parameter_prefix || 'bulk_limit';
         sig      constant str := tab || prc_name || nlt || '(' || nltt || p_cursor || ' in ' || type_ref_cursor || ',' || nltt ||
                                  p_limit || ' in pls_integer default ' || params.bulk_proc.default_limit || nlt ||
                                  ') return ' || type_rows_tab;
         l_rows   constant str := 'l_rows';
-        bdy str;
+        bdy clob;
     begin
         if not params.bulk_proc.generate then
             return null;
@@ -1865,11 +1988,10 @@ create or replace package body tapir is
         bdy := nll || sig || ' is';
         bdy := bdy || nltt || l_rows || ' ' || type_rows_tab || ';';
         bdy := bdy || nlt || 'begin';
-        bdy := bdy || nltt || 'if (' || p_cursor || '%isopen)' || nltt || 'then';
+        bdy := bdy || nltt || 'if (' || p_cursor || '%isopen) then';
         bdy := bdy || nlttt || 'fetch ' || p_cursor || ' bulk collect';
         bdy := bdy || nlttt || ' into ' || l_rows || ' limit ' || p_limit || ';';
-        bdy := bdy || nlttt || 'if (' || l_rows || '.count < ' || p_limit || ')';
-        bdy := bdy || nlttt || 'then';
+        bdy := bdy || nlttt || 'if (' || l_rows || '.count < ' || p_limit || ') then';
         bdy := bdy || nltttt || 'close ' || p_cursor || ';';
         bdy := bdy || nlttt || 'end if;';
         bdy := bdy || nlttt || 'return ' || l_rows || ';';
@@ -1879,12 +2001,12 @@ create or replace package body tapir is
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_insert_rows(p_only_header in boolean) return str is
-        prc_name constant str := 'procedure ' || params.proc_insert || '_rows';
+    function tapi_insert_rows(p_only_header in boolean) return clob is
+        prc_name constant str := 'procedure ' || params.proc_insert || bulk_proc_suffix;
         param    constant str := params.parameter_prefix || 'rows';
         sig      constant str := tab || prc_name || '(' || param || ' in out nocopy ' || type_rows_tab || ')';
         ret_tab  constant str := 'ret_tab';
-        bdy str;
+        bdy clob;
     begin
         if not params.bulk_proc.generate then
             return null;
@@ -1895,23 +2017,23 @@ create or replace package body tapir is
         bdy := bdy || nltt || ret_tab || ' ' || type_rows_tab || ';';
         bdy := bdy || nltt || 'errors' || ' ' || type_rows_tab || ';';
         bdy := bdy || nlt || 'begin';
-        bdy := bdy || nltt || ret_tab || ' := ' || params.proc_insert || '_rows(' || param || ', ' || 'errors' || ');';
-        bdy := bdy || nltt || 'if errors.count > 0';
-        bdy := bdy || nltt || 'then';
+        bdy := bdy || nltt || ret_tab || ' := ' || params.proc_insert || bulk_proc_suffix || '(' || param || ', ' ||
+               'errors' || ');';
+        bdy := bdy || nltt || 'if errors.count > 0 then';
         bdy := bdy || nlttt || 'raise ' || ex_forall_error || ';';
         bdy := bdy || nltt || 'end if;';
         bdy := bdy || nltt || param || ' := ' || ret_tab || ';';
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_insert_rows_save_exc(p_only_header in boolean) return str is
-        prc_name   constant str := 'function ' || params.proc_insert || '_rows';
+    function tapi_insert_rows_save_exc(p_only_header in boolean) return clob is
+        prc_name   constant str := 'function ' || params.proc_insert || bulk_proc_suffix;
         param      constant str := params.parameter_prefix || 'rows';
         errors_var constant str := params.parameter_prefix || 'errors';
         sig        constant str := tab || prc_name || nlt || '(' || nltt || param || ' in ' || type_rows_tab || ',' || nltt ||
                                    errors_var || ' out nocopy ' || type_rows_tab || nlt || ') return ' || type_rows_tab;
         ret_rows   constant str := 'ret_tab';
-        bdy str;
+        bdy clob;
     begin
         if not params.bulk_proc.generate then
             return null;
@@ -1931,9 +2053,9 @@ create or replace package body tapir is
         bdy := bdy || nlttt || 'returning' || ' ' || str_join(stringf(g_cols, col_quote('t.')), ', ') ||
                ' bulk collect into ' || ret_rows || ';';
         if with_cloud_events then
-            bdy := bdy || nltt || 'for idx in 1 .. ' || ret_rows || '.count loop';
+            bdy := bdy || nltt || 'for i in 1 .. ' || ret_rows || '.count loop';
             bdy := bdy || nlttt || proc_name_emit_cloud_event || '(''insert'', $$plsql_unit, ' || 'json_obj' || '(' ||
-                   ret_rows || '(idx)));';
+                   ret_rows || '(i)));';
             bdy := bdy || nltt || 'end loop;';
         end if;
         bdy := bdy || nltt || 'return ' || ret_rows || ';';
@@ -1942,13 +2064,13 @@ create or replace package body tapir is
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_insert_cur(p_only_header in boolean default false) return str is
+    function tapi_insert_cur(p_only_header in boolean default false) return clob is
         prc_name constant str := 'procedure ' || params.bulk_proc.proc_insert_cur;
         p_cursor constant str := params.parameter_prefix || 'ref_cursor';
         p_limit  constant str := params.parameter_prefix || 'bulk_limit';
         sig      constant str := tab || prc_name || nlt || '(' || nltt || p_cursor || ' in ' || type_ref_cursor || ',' || nltt ||
                                  p_limit || ' in pls_integer default ' || params.bulk_proc.default_limit || nlt || ')';
-        bdy str;
+        bdy clob;
     begin
         if not params.bulk_proc.generate then
             return null;
@@ -1959,20 +2081,21 @@ create or replace package body tapir is
         bdy := bdy || nltt || 'l_tab ' || type_rows_tab || ';';
         bdy := bdy || nlt || 'begin';
         bdy := bdy || nltt || 'loop';
-        bdy := bdy || nlttt || 'l_tab := sel_rows(' || p_cursor || ', ' || p_limit || ');';
+        bdy := bdy || nlttt || 'l_tab := ' || params.proc_select || bulk_proc_suffix || '(' || p_cursor || ', ' ||
+               p_limit || ');';
         bdy := bdy || nlttt || 'exit when l_tab.count = 0;';
         bdy := bdy || nl;
-        bdy := bdy || nlttt || 'ins_rows(l_tab);';
+        bdy := bdy || nlttt || params.proc_insert || bulk_proc_suffix || '(l_tab);';
         bdy := bdy || nltt || 'end loop;';
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_update_rows(p_only_header in boolean) return str is
-        prc_name constant str := 'procedure ' || params.proc_update || '_rows';
+    function tapi_update_rows(p_only_header in boolean) return clob is
+        prc_name constant str := 'procedure ' || params.proc_update || bulk_proc_suffix;
         param    constant str := params.parameter_prefix || 'rows';
         sig      constant str := tab || prc_name || nlt || '(' || nltt || param || ' in out nocopy ' || type_rows_tab || nlt || ')';
         ret_tab  constant str := 'ret_tab';
-        bdy str;
+        bdy clob;
     begin
         if not params.bulk_proc.generate then
             return null;
@@ -1983,9 +2106,9 @@ create or replace package body tapir is
         bdy := bdy || nltt || ret_tab || ' ' || type_rows_tab || ';';
         bdy := bdy || nltt || 'errors' || ' ' || type_rows_tab || ';';
         bdy := bdy || nlt || 'begin';
-        bdy := bdy || nltt || ret_tab || ' := ' || params.proc_update || '_rows(' || param || ', ' || 'errors' || ');';
-        bdy := bdy || nltt || 'if errors.count > 0';
-        bdy := bdy || nltt || 'then';
+        bdy := bdy || nltt || ret_tab || ' := ' || params.proc_update || bulk_proc_suffix || '(' || param || ', ' ||
+               'errors' || ');';
+        bdy := bdy || nltt || 'if errors.count > 0 then';
         bdy := bdy || nlttt || 'raise ' || ex_forall_error || ';';
         bdy := bdy || nltt || 'end if;';
         bdy := bdy || nltt || param || ' := ' || ret_tab || ';';
@@ -1993,12 +2116,13 @@ create or replace package body tapir is
     end;
 
     function tapi_update_rows_save_exc(p_only_header in boolean) return clob is
-        prc_name   constant str := 'function ' || params.proc_update || '_rows';
+        prc_name   constant str := 'function ' || params.proc_update || bulk_proc_suffix;
         param      constant str := params.parameter_prefix || 'rows';
         errors_var constant str := params.parameter_prefix || 'errors';
         sig        constant str := tab || prc_name || nlt || '(' || nltt || param || ' in ' || type_rows_tab || ',' || nltt ||
                                    errors_var || ' out nocopy ' || type_rows_tab || nlt || ') return ' || type_rows_tab;
         ret_rows   constant str := 'ret_tab';
+        l_column_not_changed str_list;
         bdy clob;
     begin
         if not params.bulk_proc.generate then
@@ -2016,19 +2140,22 @@ create or replace package body tapir is
                str_join(stringf(exclude(non_pk(changables), g_audit_cols_created),
                                 col_quote('t.') || ' = ' || col_default(col_rec(param || '(i)'))),
                         ',' || nltttt || '    ');
-        bdy := bdy || nlttt || ' where ';
-        bdy := bdy ||
+        bdy := bdy || nlttt || ' where ' ||
                str_join(stringf(g_pk_cols, col_quote('t.') || ' = ' || col_rec(param || '(i)')), nlttt || '   and ');
-        bdy := bdy || concat_if_not_null(nlttt || '   and  (',
-                                         str_join(stringf(non_pk(comparables),
-                                                          not_equal_exp(col_quote('t.'), col_rec(param || '(i)'))),
-                                                  nlttt || '      or ') || ')');
+
+        l_column_not_changed := str_join(stringf(non_pk(comparables), not_equal_exp(col_quote('t.'), col_rec(param || '(i)'))),
+                                         stringf(include(g_cols, lob_types),
+                                                 not_equal_exp(col_quote('t.'), col_rec(param || '(i)'), c_type_blob)));
+        if l_column_not_changed.count > 0 then
+            bdy := bdy || nlttt || '   and    (' || str_join(l_column_not_changed, nlttt || '        or ') || ')';
+        end if;
+
         bdy := bdy || nlttt || 'returning' || ' ' || str_join(stringf(g_cols, col_quote), ', ') ||
                ' bulk collect into ' || ret_rows || ';';
         if with_cloud_events then
-            bdy := bdy || nltt || 'for idx in 1 .. ' || ret_rows || '.count loop';
+            bdy := bdy || nltt || 'for i in 1 .. ' || ret_rows || '.count loop';
             bdy := bdy || nlttt || proc_name_emit_cloud_event || '(''update'', $$plsql_unit, ' || 'json_obj' || '(' ||
-                   ret_rows || '(idx)));';
+                   ret_rows || '(i)));';
             bdy := bdy || nltt || 'end loop;';
         end if;
         bdy := bdy || nltt || 'return ' || ret_rows || ';';
@@ -2037,13 +2164,66 @@ create or replace package body tapir is
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_pipe_rows(p_only_header in boolean default false) return str is
-        prc_name constant str := 'function ' || params.proc_pipe || '_rows';
+    function tapi_delete_rows(p_only_header in boolean) return clob is
+        prc_name constant str := 'procedure ' || params.proc_delete || bulk_proc_suffix;
+        param    constant str := params.parameter_prefix || 'rows';
+        sig      constant str := tab || prc_name || nlt || '(' || nltt || param || ' in ' || type_rows_tab || nlt || ')';
+        bdy clob;
+    begin
+        if not params.bulk_proc.generate then
+            return null;
+        elsif p_only_header then
+            return nll || sig || ';';
+        end if;
+        bdy := nll || sig || ' is';
+        bdy := bdy || nltt || 'errors' || ' ' || type_rows_tab || ';';
+        bdy := bdy || nlt || 'begin';
+        bdy := bdy || nltt || params.proc_delete || bulk_proc_suffix || '(' || param || ', ' || 'errors' || ');';
+        bdy := bdy || nltt || 'if errors.count > 0 then';
+        bdy := bdy || nlttt || 'raise ' || ex_forall_error || ';';
+        bdy := bdy || nltt || 'end if;';
+        return bdy || nlt || 'end;';
+    end;
+
+    function tapi_delete_rows_save_exc(p_only_header in boolean) return clob is
+        prc_name   constant str := 'procedure ' || params.proc_delete || bulk_proc_suffix;
+        param      constant str := params.parameter_prefix || 'rows';
+        errors_var constant str := params.parameter_prefix || 'errors';
+        sig        constant str := tab || prc_name || nlt || '(' || nltt || param || ' in ' || type_rows_tab || ',' || nltt ||
+                                   errors_var || ' out nocopy ' || type_rows_tab || nlt || ')';
+        bdy clob;
+    begin
+        if not params.bulk_proc.generate then
+            return null;
+        elsif p_only_header then
+            return nll || sig || ';';
+        end if;
+        bdy := nll || sig || ' is';
+        bdy := bdy || nlt || 'begin';
+        bdy := bdy || nltt || errors_var || ' := ' || type_rows_tab || '();';
+        bdy := bdy || nltt || 'forall i in indices of ' || param || ' save exceptions';
+        bdy := bdy || nlttt || 'delete ' || table_name() || ' t';
+        bdy := bdy || nlttt || ' where ';
+        bdy := bdy ||
+               str_join(stringf(g_pk_cols, col_quote('t.') || ' = ' || col_rec(param || '(i)')), nlttt || '   and ') || ';';
+        if with_cloud_events then
+            bdy := bdy || nltt || 'for i in 1 .. ' || param || '.count loop';
+            bdy := bdy || nlttt || proc_name_emit_cloud_event || '(''delete'', $$plsql_unit, ' || 'json_obj' || '(' ||
+                   param || '(i)));';
+            bdy := bdy || nltt || 'end loop;';
+        end if;
+    
+        bdy := bdy || exceptions_forall(param, errors_var);
+        return bdy || nlt || 'end;';
+    end;
+
+    function tapi_pipe_rows(p_only_header in boolean default false) return clob is
+        prc_name constant str := 'function ' || params.proc_pipe;
         param    constant str := params.parameter_prefix || 'ref_cursor';
         sig      constant str := tab || prc_name || '(' || param || ' in ' || type_ref_cursor || ') return ' ||
                                  type_rows_tab || nltt || 'pipelined';
         l_var    constant str := 'l_' || param_name_row;
-        bdy str;
+        bdy clob;
     begin
         if params.proc_pipe is null then
             return null;
@@ -2053,7 +2233,7 @@ create or replace package body tapir is
         bdy := nll || sig || ' is';
         bdy := bdy || nltt || l_var || ' ' || type_rt_name || ';';
         bdy := bdy || nlt || 'begin';
-        bdy := bdy || nltt || 'if not ' || param || '%isopen' || nltt || 'then';
+        bdy := bdy || nltt || 'if not ' || param || '%isopen then';
         bdy := bdy || nlttt || 'return;';
         bdy := bdy || nltt || 'end if;';
         bdy := bdy || nltt || 'loop';
@@ -2064,17 +2244,21 @@ create or replace package body tapir is
         bdy := bdy || nltt || 'end loop;';
         bdy := bdy || nltt || 'close ' || param || ';';
         bdy := bdy || nltt || 'return;';
+        bdy := bdy || nlt || 'exception';
+        bdy := bdy || nltt || 'when no_data_needed then';
+        bdy := bdy || nlttt || 'close ' || param || ';';
+        bdy := bdy || nlttt || 'raise;';
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_checksum_col(p_only_header in boolean) return str is
+    function tapi_checksum_col(p_only_header in boolean) return clob is
         doc       constant str := tab || '/**' || nlt || '* Returns a SHA512 hash of the concatenated values.' || nlt || '*/';
         prc_name  constant str := 'function ' || params.proc_checksum;
         sig       constant str := prc_name || nlt || '(' || nltt ||
                                   str_join(stringf(non_audit, tag_sig_param || ' in ' || tag_type), ',' || nltt) || nlt ||
                                   ') return varchar2 deterministic';
         proc_hash constant str := 'sys.dbms_crypto.hash';
-        bdy str;
+        bdy clob;
     begin
         if not priv_to_dbms_crypto then
             return null;
@@ -2085,21 +2269,21 @@ create or replace package body tapir is
         bdy := nll || tab || sig || ' is';
         bdy := bdy || nlt || 'begin';
         bdy := bdy || nltt || 'return ' || proc_hash || '(';
-        bdy := bdy || str_join(stringf(non_audit, col_char(tag_param)), nltt || '     ' || indent(proc_hash) || '|| ') || ',';
+        bdy := bdy || str_join(stringf(non_audit, col_char(tag_param)), ' || ') || ',';
         bdy := bdy || nltt || '        ' || indent(proc_hash) || 'sys.dbms_crypto.hash_sh512);';
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_checksum_rt(p_only_header in boolean) return str is
+    function tapi_checksum_rt(p_only_header in boolean) return clob is
         doc      constant str := tab || '/**' || nlt || '* Returns an SHA512 hash of the record.' || nlt || '*/';
         prc_name constant str := 'function ' || params.proc_checksum;
         param    constant str := params.parameter_prefix || param_name_row;
         sig      constant str := prc_name || nlt || '(' || nltt || param || ' in ' || type_rt_name || nlt ||
                                  ') return varchar2';
-        bdy str;
+        bdy clob;
     begin
-        if not priv_to_dbms_crypto then
-            return null;
+        if not priv_to_dbms_crypto or not params.concurrency_control.opt_lock_generate then
+            return '';
         elsif p_only_header then
             return nll || doc || nlt || sig || ';';
         end if;
@@ -2107,12 +2291,12 @@ create or replace package body tapir is
         bdy := nll || tab || sig || ' is';
         bdy := bdy || nlt || 'begin';
         bdy := bdy || nltt || 'return ' || params.proc_checksum || '(' ||
-               str_join(stringf(non_audit, col_rec(param)), ',' || nltt || '        ' || indent(params.proc_checksum)) || ');';
+               str_join(stringf(non_audit, col_rec(param)), ', ') || ');';
         return bdy || nlt || 'end;';
     end;
 
-    function tapi_subtypes return str is
-        spc str;
+    function tapi_subtypes return clob is
+        spc clob;
     begin
         spc := nll || tab ||
                str_join(stringf(g_cols,
@@ -2128,8 +2312,9 @@ create or replace package body tapir is
         spc := nll || tab || decl || nlt || '(' || nltt ||
                str_join(stringf(g_cols, tag_rt_sig || ' ' || tag_type), ',' || nltt) || nlt || ');';
     
-        if priv_to_dbms_crypto and params.create_occ_procedures then
-            decl := 'type ' || type_rt_name || occ_name_suffix || ' is record';
+        if priv_to_dbms_crypto and params.concurrency_control.opt_lock_generate and
+           params.concurrency_control.row_version_column is null then
+            decl := 'type ' || type_rt_name_check || ' is record';
             spc  := spc || nll || tab || decl || '(' ||
                     str_join(stringf(g_cols, tag_rt_asg || ' ' || tag_type), nlt || indent(decl) || ',');
             spc  := spc || nlt || indent(decl) || ',' || 'checksum' || '    ' || type_col_hash;
@@ -2139,12 +2324,38 @@ create or replace package body tapir is
         return spc;
     end;
 
+    function tapi_strip_checksum(gen_header in boolean default false) return clob is
+        doc      constant str := tab || '/**' || nlt || '* Returns a record of type ' || type_rt_name ||
+                                 ' after removing the checksum of the given record.' || nlt || '*/';
+        prc_name constant str := 'function ' || 'strip_checksum';
+        param    constant str := params.parameter_prefix || param_name_row;
+        sig      constant str := prc_name || nlt || '(' || nltt || param || ' in ' || type_rt_name_check || nlt ||
+                                 ') return ' || type_rt_name;
+        bdy   clob;
+        l_var str := 'l_rt';
+    begin
+        if not priv_to_dbms_crypto or not params.concurrency_control.opt_lock_generate or
+           params.concurrency_control.row_version_column is not null then
+            return '';
+        elsif gen_header then
+            return nll || doc || nlt || sig || ';';
+        end if;
+    
+        bdy := nll || tab || sig || ' is';
+        bdy := bdy || nltt || l_var || ' ' || type_rt_name || ';';
+        bdy := bdy || nlt || 'begin';
+        bdy := bdy || nltt || str_join(stringf(g_cols, col_rec('l_rt') || ' := ' || col_rec(param) || ';'), nltt);
+        bdy := bdy || nltt || 'return ' || l_var || ';';
+        return bdy || nlt || 'end;';
+    end;
+
     function gen_procedures(gen_header in boolean default false) return clob is
         aquire_lock constant boolean := true;
         bdy clob;
     begin
         bdy := bdy || tapi_subtype_defaults(gen_header);
         bdy := bdy || tapi_checksum_rt(gen_header);
+        bdy := bdy || tapi_strip_checksum(gen_header);
         bdy := bdy || tapi_json_obj(gen_header);
         bdy := bdy || tapi_json_arr(gen_header);
         bdy := bdy || tapi_json_import(gen_header);
@@ -2152,25 +2363,24 @@ create or replace package body tapir is
         bdy := bdy || tapi_xxdo(gen_header);
         bdy := bdy || tapi_redo(gen_header);
         bdy := bdy || tapi_undo(gen_header);
-        for idx in 1 .. g_cons.count loop
-            if g_cons(idx).c_type = 'N' then
+        for i in 1 .. g_cons.count loop
+            if g_cons(i).c_type = 'N' then
                 continue;
             end if;
             declare
-                l_cons_cols tab_cols_t := read_cons_cols(g_cons(idx).c_name);
+                l_cons_cols tab_cols_t := read_cons_cols(g_cons(i).c_name);
             begin
-                bdy := bdy || tapi_exists_select_uk(l_cons_cols, gen_header, g_cons(idx).c_suffix);
-                bdy := bdy || tapi_exists_select_uk(l_cons_cols, gen_header, g_cons(idx).c_suffix, aquire_lock);
-                bdy := bdy || tapi_select_uk(l_cons_cols, gen_header, g_cons(idx).c_suffix);
-                bdy := bdy || tapi_select_uk(l_cons_cols, gen_header, g_cons(idx).c_suffix, aquire_lock);
-                bdy := bdy || tapi_select_occ_uk(l_cons_cols, gen_header, g_cons(idx).c_suffix);
-                bdy := bdy || tapi_exist_uk(l_cons_cols, gen_header, g_cons(idx).c_suffix);
-                bdy := bdy || tapi_exist_uk_yn(l_cons_cols, gen_header, g_cons(idx).c_suffix);
-                bdy := bdy || tapi_counts_uk(l_cons_cols, gen_header, g_cons(idx).c_suffix);
-                bdy := bdy || tapi_delete_uk(l_cons_cols, gen_header, g_cons(idx).c_suffix);
+                bdy := bdy || tapi_exists_select_uk(l_cons_cols, gen_header, g_cons(i).c_suffix);
+                bdy := bdy || tapi_exists_select_uk(l_cons_cols, gen_header, g_cons(i).c_suffix, aquire_lock);
+                bdy := bdy || tapi_select_uk(l_cons_cols, gen_header, g_cons(i).c_suffix);
+                bdy := bdy || tapi_select_uk(l_cons_cols, gen_header, g_cons(i).c_suffix, aquire_lock);
+                bdy := bdy || tapi_select_occ_uk(l_cons_cols, gen_header, g_cons(i).c_suffix);
+                bdy := bdy || tapi_exist_uk(l_cons_cols, gen_header, g_cons(i).c_suffix);
+                bdy := bdy || tapi_exist_uk_yn(l_cons_cols, gen_header, g_cons(i).c_suffix);
+                bdy := bdy || tapi_counts_uk(l_cons_cols, gen_header, g_cons(i).c_suffix);
+                bdy := bdy || tapi_delete_uk(l_cons_cols, gen_header, g_cons(i).c_suffix);
             end;
         end loop;
-    
         bdy := bdy || tapi_exists_select_rt(gen_header);
         bdy := bdy || tapi_exists_rt(gen_header);
         bdy := bdy || tapi_select_rt_func(gen_header);
@@ -2182,6 +2392,7 @@ create or replace package body tapir is
         bdy := bdy || tapi_update_rt(gen_header);
         bdy := bdy || tapi_update_occ(gen_header);
         bdy := bdy || tapi_delete_rt(gen_header);
+        bdy := bdy || tapi_delete_occ(gen_header);
         bdy := bdy || tapi_merge_rt(gen_header);
         bdy := bdy || tapi_select_rows(gen_header);
         bdy := bdy || tapi_insert_rows(gen_header);
@@ -2189,14 +2400,16 @@ create or replace package body tapir is
         bdy := bdy || tapi_insert_cur(gen_header);
         bdy := bdy || tapi_update_rows(gen_header);
         bdy := bdy || tapi_update_rows_save_exc(gen_header);
+        bdy := bdy || tapi_delete_rows(gen_header);
+        bdy := bdy || tapi_delete_rows_save_exc(gen_header);
         bdy := bdy || tapi_pipe_rows(gen_header);
         bdy := bdy || tapi_print_rt(gen_header);
         bdy := bdy || tapi_to_string_rt(gen_header);
         return bdy;
     end;
 
-    function tapi_cursor_indices(p_only_header in boolean) return str is
-        bdy str;
+    function tapi_cursor_indices(p_only_header in boolean) return clob is
+        bdy clob;
     
         function cursor_idx
         (
@@ -2204,7 +2417,7 @@ create or replace package body tapir is
             p_suffix      in varchar2,
             p_for_update  in boolean,
             p_only_header in boolean default false
-        ) return str is
+        ) return clob is
             cur_name constant str := 'cursor ' || cursor_prefix || coalesce(p_suffix, cursor_suffix_pk) || case
                                          when p_for_update then
                                           '_lock'
@@ -2212,7 +2425,7 @@ create or replace package body tapir is
             sig      constant str := nll || tab || lower(cur_name) || nlt || '(' || nltt ||
                                      str_join(stringf(p_cols_tab, tag_sig_param || ' ' || tag_type || ' default null'),
                                               ',' || nltt) || nlt || ') return ' || type_rt_name;
-            spc str;
+            spc clob;
         begin
             if p_only_header then
                 return sig || ';';
@@ -2227,13 +2440,13 @@ create or replace package body tapir is
                             nltt || '   and ');
             spc := spc || case
                        when p_for_update then
-                        nltt || '   for update' || case params.acquire_lock_timeout
-                            when -1 then
+                        nltt || '   for update' || case
+                            when params.concurrency_control.acquire_lock_timeout < 0 then
                              null
-                            when 0 then
+                            when params.concurrency_control.acquire_lock_timeout = 0 then
                              ' nowait'
                             else
-                             ' wait ' || params.acquire_lock_timeout
+                             ' wait ' || params.concurrency_control.acquire_lock_timeout
                         end
                    end;
             return spc || ';';
@@ -2244,15 +2457,16 @@ create or replace package body tapir is
             p_cols_tab    in tab_cols_t,
             p_suffix      in varchar2,
             p_only_header in boolean default false
-        ) return str is
+        ) return clob is
             cur_name constant str := 'cursor ' || cursor_prefix || coalesce(p_suffix, cursor_suffix_pk) ||
-                                     occ_name_suffix;
-            sig      constant str := nll || tab || lower(cur_name) || nlt || '(' ||
+                                     cur_checksum_name_suffix;
+            sig      constant str := nll || tab || lower(cur_name) || nlt || '(' || nltt ||
                                      str_join(stringf(p_cols_tab, tag_sig_param || ' ' || tag_type || ' default null'),
-                                              ',' || nltt) || nlt || ') return ' || type_rt_name_occ;
-            spc str;
+                                              ',' || nltt) || nlt || ') return ' || type_rt_name_check;
+            spc clob;
         begin
-            if not priv_to_dbms_crypto or not params.create_occ_procedures then
+            if not priv_to_dbms_crypto or not params.concurrency_control.opt_lock_generate or
+               params.concurrency_control.row_version_column is not null then
                 return null;
             elsif p_only_header then
                 return sig || ';';
@@ -2261,8 +2475,7 @@ create or replace package body tapir is
             spc := sig || ' is';
             spc := spc || nltt || 'select t.*,';
             spc := spc || nltt || '       ' || tapi_name || '.' || params.proc_checksum || '(' ||
-                   str_join(stringf(non_audit, col_quote('t.')),
-                            ',' || nltt || '       ' || indent(tapi_name || '.' || params.proc_checksum)) || ')';
+                   str_join(stringf(non_audit, col_quote('t.')), ', ') || ')';
             spc := spc || nltt || '  from ' || table_name() || ' t';
             spc := spc || nltt || ' where ' ||
                    str_join(stringf(p_cols_tab,
@@ -2271,14 +2484,14 @@ create or replace package body tapir is
             return spc || ';';
         end;
     begin
-        for idx in 1 .. g_cons.count loop
+        for i in 1 .. g_cons.count loop
             declare
-                l_cons_cols tab_cols_t := read_cons_cols(g_cons(idx).c_name);
+                l_cons_cols tab_cols_t := read_cons_cols(g_cons(i).c_name);
             begin
-                bdy := bdy || cursor_idx(l_cons_cols, g_cons(idx).c_suffix, false, p_only_header);
-                bdy := bdy || cursor_idx(l_cons_cols, g_cons(idx).c_suffix, true, p_only_header);
-                if g_cons(idx).c_type member of str_list('P', 'U') then
-                    bdy := bdy || cursor_idx_occ(l_cons_cols, g_cons(idx).c_suffix, p_only_header);
+                bdy := bdy || cursor_idx(l_cons_cols, g_cons(i).c_suffix, false, p_only_header);
+                bdy := bdy || cursor_idx(l_cons_cols, g_cons(i).c_suffix, true, p_only_header);
+                if g_cons(i).c_type member of str_list('P', 'U') then
+                    bdy := bdy || cursor_idx_occ(l_cons_cols, g_cons(i).c_suffix, p_only_header);
                 end if;
             end;
         end loop;
@@ -2290,7 +2503,7 @@ create or replace package body tapir is
         doc constant str := '/**' || nl || '* Generated package for table ' || table_name() || nl || '*/';
         spc clob;
     begin
-        spc := doc || nl || 'create or replace package ' || owner_name || '.' || tapi_name || ' authid definer is';
+        spc := doc || nl || 'create or replace package ' || owner_name() || '.' || tapi_name() || ' authid definer is';
         if p_gen_info is not null then
             spc := spc || nl || p_gen_info;
         end if;
@@ -2307,7 +2520,7 @@ create or replace package body tapir is
     function create_body(p_gen_info in clob default null) return clob is
         bdy clob;
     begin
-        bdy := 'create or replace package body ' || owner_name || '.' || tapi_name || ' is';
+        bdy := 'create or replace package body ' || owner_name() || '.' || tapi_name() || ' is';
         if p_gen_info is not null then
             bdy := bdy || nl || p_gen_info;
         end if;
@@ -2319,7 +2532,7 @@ create or replace package body tapir is
         bdy := bdy || nlt || ex_forall_error || ' exception;';
         bdy := bdy || nlt || 'pragma exception_init (' || ex_forall_error || ', -24381);';
         bdy := bdy || tapi_cursor_indices(false);
-        bdy := bdy || tapi_raise_if_null;
+        bdy := bdy || tapi_assert_not_null;
         bdy := bdy || tapi_base64_encode;
         bdy := bdy || tapi_base64_decode;
         bdy := bdy || tapi_emit_cloud_event;
@@ -2359,8 +2572,13 @@ create or replace package body tapir is
         g_owner      := upper(sys.dbms_assert.schema_name(p_owner));
         g_table_name := check_table(p_table_name);
         read_tab_cols();
+        if params.concurrency_control.row_version_column is not null and include(p_tab_cols => g_cols, p_include_name => str_list(upper(params.concurrency_control.row_version_column))).count = 0 then
+            raise_application_error(-20000,
+                                    'Column ' || params.concurrency_control.row_version_column ||
+                                    ' not contained in table.');
+        end if;
         if params.use_result_cache and g_includes_lobs then
-            raise_application_error(-20000, 'RESULT_CACHE is not allowed for tables containg LOB types');
+            raise_application_error(-20000, 'RESULT_CACHE is not allowed for tables containg LOB types.');
         end if;
         read_constraints();
         if g_pk_cols.count = 0 then
@@ -2398,10 +2616,6 @@ create or replace package body tapir is
         execute immediate create_body(l_gen_info);
         sys.dbms_output.put_line(tapi_name || ' [' ||
                                  mod(sys.dbms_utility.get_time - start_time + c_bignum, c_bignum) / 100 || ' sec]');
-    exception
-        when others then
-            dbms_output.put_line(sqlerrm);
-            raise;
     end;
 
     procedure compile_tapis
@@ -2570,32 +2784,32 @@ create or replace package body tapir is
         nltttt  := nlttt || tab;
         nlttttt := nltttt || tab;
     
-        params.proc_select               := sys.dbms_assert.simple_sql_name(params.proc_select);
-        params.proc_update               := sys.dbms_assert.simple_sql_name(params.proc_update);
-        params.proc_insert               := sys.dbms_assert.simple_sql_name(params.proc_insert);
+        params.proc_select                          := sys.dbms_assert.simple_sql_name(params.proc_select);
+        params.proc_update                          := sys.dbms_assert.simple_sql_name(params.proc_update);
+        params.proc_insert                          := sys.dbms_assert.simple_sql_name(params.proc_insert);
         params.bulk_proc.proc_insert_cur := case
                                                 when params.bulk_proc.proc_insert_cur is not null then
                                                  sys.dbms_assert.simple_sql_name(params.bulk_proc.proc_insert_cur)
                                             end;
-        params.proc_delete               := sys.dbms_assert.simple_sql_name(params.proc_delete);
+        params.proc_delete                          := sys.dbms_assert.simple_sql_name(params.proc_delete);
         params.proc_merge := case
                                  when params.proc_merge is not null then
                                   sys.dbms_assert.simple_sql_name(params.proc_merge)
                              end;
-        params.proc_exists               := sys.dbms_assert.simple_sql_name(params.proc_exists);
-        params.proc_exists_and_select    := sys.dbms_assert.simple_sql_name(params.proc_exists_and_select);
-        params.proc_lock_record := case
-                                       when params.proc_lock_record is not null then
-                                        sys.dbms_assert.simple_sql_name(params.proc_lock_record)
-                                   end;
+        params.proc_exists                          := sys.dbms_assert.simple_sql_name(params.proc_exists);
+        params.proc_exists_and_select               := sys.dbms_assert.simple_sql_name(params.proc_exists_and_select);
+        params.concurrency_control.proc_lock_record := case
+                                                           when params.concurrency_control.proc_lock_record is not null then
+                                                            sys.dbms_assert.simple_sql_name(params.concurrency_control.proc_lock_record)
+                                                       end;
         params.proc_count := case
                                  when params.proc_count is not null then
                                   sys.dbms_assert.simple_sql_name(params.proc_count)
                              end;
-        params.proc_print := case
-                                 when params.proc_print is not null then
-                                  sys.dbms_assert.simple_sql_name(params.proc_print)
-                             end;
+        params.print_proc.proc_print := case
+                                            when params.print_proc.proc_print is not null then
+                                             sys.dbms_assert.simple_sql_name(params.print_proc.proc_print)
+                                        end;
         params.proc_json_obj := case
                                     when params.proc_json_obj is not null then
                                      sys.dbms_assert.simple_sql_name(params.proc_json_obj)
@@ -2620,7 +2834,7 @@ create or replace package body tapir is
                                        when params.parameter_prefix is not null then
                                         sys.dbms_assert.simple_sql_name(params.parameter_prefix)
                                    end;
-        params.log_exception_procedure   := lower(params.log_exception_procedure);
+        params.log_exception_procedure              := lower(params.log_exception_procedure);
         if params.audit.user_exp is null then
             params.audit.col_created_by  := null;
             params.audit.col_modified_by := null;

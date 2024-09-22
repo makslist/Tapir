@@ -24,6 +24,7 @@ create table if not exists test_table_all_types(
    --long_raw_t                       long raw,
    bool_t                           boolean,
    --rowid_t                          rowid,
+   row_version                      number,
    created_by                       varchar2(100),
    created_at                       date,
    modified_by                      varchar2(100),
@@ -71,6 +72,12 @@ create table if not exists test_table_edge_case(
    test_table_edge_case          varchar2(100), -- special handling in record definition  
    varchar2_t                    varchar2(100) default 'null',
    number_t                      number,
+   row_version                   number,
+   nvarchar2_def_t               nvarchar2(100) default 'nchar',
+   blob_def_t                    blob default '626C6F62',
+   clob_def_t                    clob default substr(sys_guid(), 1, 20),
+   nclob_def_t                   nclob default substr(sys_guid(), 1, 20),
+   number_def_t                  number default 123456789,
    --rowid_t                       rowid,
    check (number_t in (1, 0)),
    constraint test_table_edge_case_pk primary key(pk) using index
@@ -110,6 +117,7 @@ create table if not exists test_table(
    bool_t                           boolean,
    --rowid_t                          rowid,
    virtual_col                      integer generated always as (number_t * 2) virtual,
+   row_version                      number,
    created_by                       varchar2(100),
    created_at                       date,
    modified_by                      varchar2(100),
@@ -142,36 +150,38 @@ declare
                                                  'CLOB_T'                           => 'substr(sys_guid(), 1, 20)',
                                                  'NCLOB_T'                          => 'substr(sys_guid(), 1, 20)',
                                                  'RAW_T'                            => 'utl_raw.cast_to_raw(''raw'')',
-                                                 'BOOL_T'                           => 'true',
+                                                 'BOOL_T'                           => 'false',
                                                  'ROWID_T'                          => '''1''');
     l_queue_name  varchar2(100) := 'tapi_aq';
     l_event_type  varchar2(100) := 'tapi_cloud_event';
     l_ce_tab_name varchar2(100) := 'tapi_ce_table';
 begin
     execute immediate 'drop table if exists ' || l_ce_tab_name;
-    tapir.create_ce_table(p_table_name => l_ce_tab_name,
-                          p_schema_name => user,
-                          p_immutable => false,
+    tapir.create_ce_table(p_table_name     => l_ce_tab_name,
+                          p_schema_name    => user,
+                          p_immutable      => false,
                           p_retention_days => null);
 
     tapir.drop_ce_queue(p_queue_name => l_queue_name, p_drop_type => true);
     tapir.create_ce_queue(p_queue_name => l_queue_name, p_event_type => l_event_type);
 
-    tapir.init(tapir.params_t(tapi_name                           => tapir.mapping('^(.*)$' => '\1$tapi'),
-                              create_occ_procedures               => true,
-                              raise_error_on_failed_update_delete => true,
-                              boolean_pseudo_type                 => tapir.boolean_pseudo_type_t(),
-                              log_exception_procedure             => 'dbms_output.put_line(\1)',
-                              use_result_cache                    => false,
-                              audit                               => tapir.audit_t(user_exp              => '''me''',
-                                                                                   col_created_by        => 'created_by',
-                                                                                   col_created_date      => 'created_at',
-                                                                                   col_modified_by       => 'modified_by',
-                                                                                   col_modified_date     => 'modified_at',
-                                                                                   ignore_when_comparing => true),
-                              defaults                            => tapir.defaults_t(init_record_expressions => init_values),
-                              cloud_events                        => tapir.cloud_events_t(table_name    => l_ce_tab_name,
-                                                                                          aq_queue_name => l_queue_name)));
+    tapir.init(tapir.params_t(tapi_name                               => tapir.mapping('^(.*)$' => '\1$tapi'),
+                              raise_error_on_failed_update_delete     => true,
+                              boolean_pseudo_type                     => tapir.boolean_pseudo_type_t(),
+                              log_exception_procedure                 => 'dbms_output.put_line(\1)',
+                              use_result_cache                        => false,
+                              audit                                   => tapir.audit_t(user_exp          => '''me''',
+                                                                                       col_created_by    => 'created_by',
+                                                                                       col_created_date  => 'created_at',
+                                                                                       col_modified_by   => 'modified_by',
+                                                                                       col_modified_date => 'modified_at'),
+                              ignore_meta_data_columns_when_comparing => true,
+                              defaults                                => tapir.defaults_t(init_record_expressions => init_values),
+                              concurrency_control                     => tapir.concurrency_control_t(opt_lock_generate  => true,
+                                                                                                     row_version_column => null),
+                              cloud_events                            => tapir.cloud_events_t(table_name        => l_ce_tab_name,
+                                                                                              aq_queue_name     => l_queue_name,
+                                                                                              aq_recipient_list => tapir.str_list('CONSUMER'))));
     tapir.compile_tapi(p_table_name => 'test_table');
 end;
 /

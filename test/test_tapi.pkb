@@ -15,17 +15,16 @@ create or replace package body test_tapi is
     begin
         l_tapi := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => l_pk1));
     
-        ut.expect(test_table$tapi.counts(p_pk => l_pk1)).to_equal(1);
+        ut.expect(test_table$tapi.cnt(p_pk => l_pk1)).to_equal(1);
     end;
 
     procedure test_print is
-        l_pk1    test_table$tapi.pk_t := 1;
-        l_tapi   test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => l_pk1));
+        l_tapi   test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => 1));
         l_line   varchar2(32767);
         l_status integer;
     begin
         test_table$tapi.print(l_tapi);
-
+    
         dbms_output.get_line(l_line, l_status);
         ut.expect(l_status).to_equal(0);
     end;
@@ -39,7 +38,6 @@ create or replace package body test_tapi is
     end;
 
     procedure test_insert_dup_val_on_index_unique is
-        l_pk1  test_table$tapi.pk_t := 1;
         l_tapi test_table$tapi.rt;
     begin
         l_tapi := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => 1, varchar2_t => '1'));
@@ -47,7 +45,6 @@ create or replace package body test_tapi is
     end;
 
     procedure test_insert_not_null_constraint is
-        l_pk1  test_table$tapi.pk_t := 1;
         l_tapi test_table$tapi.rt;
     begin
         l_tapi := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => 1, number_t => null));
@@ -62,11 +59,11 @@ create or replace package body test_tapi is
     procedure test_insert_rows is
         l_rows test_table$tapi.rows_tab;
     begin
-        l_rows := test_table$tapi.rows_tab(test_table$tapi.rt_defaults(pk => '1'),
-                                           test_table$tapi.rt_defaults(pk => '2'));
+        l_rows := test_table$tapi.rows_tab(test_table$tapi.rt_defaults(pk => 1),
+                                           test_table$tapi.rt_defaults(pk => 2));
         test_table$tapi.ins_rows(l_rows);
     
-        ut.expect(test_table$tapi.counts()).to_equal(2);
+        ut.expect(test_table$tapi.cnt()).to_equal(2);
     end;
 
     procedure test_ins_cursor is
@@ -96,6 +93,7 @@ create or replace package body test_tapi is
                    utl_raw.cast_to_raw('raw') as t_raw,
                    true as t_bool,
                    null as virtual_col,
+                   1 as row_version,
                    null as created_by_t,
                    null as created_at_t,
                    null as modified_by_t,
@@ -103,93 +101,90 @@ create or replace package body test_tapi is
               from dual;
         test_table$tapi.ins_cur(l_cur);
     
-        ut.expect(test_table$tapi.counts(p_pk => l_pk1)).to_equal(1);
+        ut.expect(test_table$tapi.cnt(p_pk => l_pk1)).to_equal(1);
     end;
 
     procedure test_insert_rows_return_errors is
-        l_pk1        test_table$tapi.pk_t := 1;
-        l_unique_row test_table$tapi.rt := test_table$tapi.rt_defaults(pk => l_pk1);
+        l_unique_row test_table$tapi.rt := test_table$tapi.rt_defaults(pk => 1);
         l_rows       test_table$tapi.rows_tab;
         l_errors     test_table$tapi.rows_tab;
     begin
         test_table$tapi.ins(l_unique_row);
-        l_rows := test_table$tapi.rows_tab(l_unique_row, test_table$tapi.rt_defaults(pk => '2'));
+        l_rows := test_table$tapi.rows_tab(l_unique_row, test_table$tapi.rt_defaults(pk => 2));
         l_rows := test_table$tapi.ins_rows(l_rows, l_errors);
     
         ut.expect(l_rows.count).to_equal(1);
         ut.expect(l_errors.count).to_equal(1);
-        ut.expect(test_table$tapi.counts()).to_equal(2);
+        ut.expect(test_table$tapi.cnt()).to_equal(2);
     end;
 
     procedure test_insert_rows_exception is
         l_rows test_table$tapi.rows_tab;
     begin
-        l_rows := test_table$tapi.rows_tab(test_table$tapi.rt_defaults(pk => '1'));
+        l_rows := test_table$tapi.rows_tab(test_table$tapi.rt_defaults(pk => 1));
         test_table$tapi.ins_rows(l_rows);
     
         test_table$tapi.ins_rows(l_rows);
     end;
 
     procedure test_exists is
-        l_pk1        test_table$tapi.pk_t := 1;
-        l_unique_col test_table$tapi.pk_t := '1';
-        l_tapi       test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk         => l_pk1,
+        l_unique_col test_table$tapi.varchar2_t_t := '1';
+        l_tapi       test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk         => 1,
                                                                                            varchar2_t => l_unique_col));
         l_exists     boolean;
     begin
-        l_exists := test_table$tapi.exist(l_tapi);
+        l_exists := test_table$tapi.exst(l_tapi);
         ut.expect(l_exists).to_be_true();
     
-        l_exists := test_table$tapi.exist_unique_col(p_varchar2_t => l_unique_col);
+        l_exists := test_table$tapi.exst_unique_col(p_varchar2_t => l_unique_col);
         ut.expect(l_exists).to_be_true();
     end;
 
     procedure test_exists_yn is
         l_pk1        test_table$tapi.pk_t := 1;
-        l_unique_col test_table$tapi.pk_t := '1';
+        l_unique_col test_table$tapi.varchar2_t_t := '1';
         l_tapi       test_table$tapi.rt;
         l_exists_yn  varchar2(1);
     begin
-        l_exists_yn := test_table$tapi.exist_yn(l_pk1);
+        l_exists_yn := test_table$tapi.exst_yn(l_pk1);
         ut.expect(l_exists_yn).to_equal('N');
     
-        l_exists_yn := test_table$tapi.exist_unique_col_yn(p_varchar2_t => l_unique_col);
+        l_exists_yn := test_table$tapi.exst_unique_col_yn(p_varchar2_t => l_unique_col);
         ut.expect(l_exists_yn).to_equal('N');
     
         l_tapi := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => l_pk1, varchar2_t => l_unique_col));
     
-        l_exists_yn := test_table$tapi.exist_yn(l_pk1);
+        l_exists_yn := test_table$tapi.exst_yn(l_pk1);
         ut.expect(l_exists_yn).to_equal('Y');
     
-        l_exists_yn := test_table$tapi.exist_unique_col_yn(p_varchar2_t => l_unique_col);
+        l_exists_yn := test_table$tapi.exst_unique_col_yn(p_varchar2_t => l_unique_col);
         ut.expect(l_exists_yn).to_equal('Y');
     end;
 
     procedure test_counts is
         l_pk1        test_table$tapi.pk_t := 1;
-        l_unique_col test_table$tapi.pk_t := '1';
+        l_unique_col test_table$tapi.varchar2_t_t := '1';
         l_tapi       test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk         => l_pk1,
                                                                                            varchar2_t => l_unique_col));
         l_count      number;
     begin
-        l_count := test_table$tapi.counts(p_pk => l_pk1);
+        l_count := test_table$tapi.cnt(p_pk => l_pk1);
         ut.expect(l_count).to_equal(1);
     
-        l_count := test_table$tapi.counts_unique_col(p_varchar2_t => l_unique_col);
+        l_count := test_table$tapi.cnt_unique_col(p_varchar2_t => l_unique_col);
         ut.expect(l_count).to_equal(1);
     end;
 
     procedure test_exists_select is
-        l_pk1        test_table$tapi.pk_t := 1;
-        l_unique_col test_table$tapi.pk_t := '1';
-        l_tapi       test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk         => l_pk1,
+        l_unique_col test_table$tapi.varchar2_t_t := '1';
+        l_tapi       test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk         => 1,
                                                                                            varchar2_t => l_unique_col));
         l_exists     boolean;
     begin
-        l_exists := test_table$tapi.exists_sel(l_tapi);
+        l_exists := test_table$tapi.exst_sel(l_tapi);
         ut.expect(l_exists).to_be_true();
     
-        l_exists := test_table$tapi.exists_sel_unique_col(p_varchar2_t => l_unique_col, p_rec => l_tapi);
+        l_exists := test_table$tapi.exst_sel_unique_col(p_varchar2_t => l_unique_col, p_rec => l_tapi);
         ut.expect(l_exists).to_be_true();
     end;
 
@@ -204,14 +199,12 @@ create or replace package body test_tapi is
     end;
 
     procedure test_select_no_data_found is
-        l_pk1  test_table$tapi.pk_t := 1;
         l_tapi test_table$tapi.rt;
     begin
-        l_tapi := test_table$tapi.sel(p_pk => l_pk1);
+        l_tapi := test_table$tapi.sel(p_pk => 1);
     end;
 
     procedure test_select_unique_col_no_data_found is
-        l_pk1  test_table$tapi.pk_t := 1;
         l_tapi test_table$tapi.rt;
     begin
         l_tapi := test_table$tapi.sel_unique_col(p_varchar2_t => 'aaa');
@@ -232,16 +225,14 @@ create or replace package body test_tapi is
     end;
 
     procedure test_select_for_update_no_data_found is
-        l_pk1  test_table$tapi.pk_t := 1;
         l_tapi test_table$tapi.rt;
     begin
-        l_tapi := test_table$tapi.sel_lock(p_pk => l_pk1);
+        l_tapi := test_table$tapi.sel_lock(p_pk => 1);
     end;
 
     procedure test_select_unique_col_for_update is
-        l_pk1        test_table$tapi.pk_t := 1;
         l_unique_col test_table$tapi.varchar2_t_t := '1';
-        l_tapi       test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk         => l_pk1,
+        l_tapi       test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk         => 1,
                                                                                            varchar2_t => l_unique_col));
     begin
         l_tapi := test_table$tapi.sel_lock_unique_col(p_varchar2_t => l_unique_col);
@@ -249,9 +240,8 @@ create or replace package body test_tapi is
     end;
 
     procedure test_select_unique_col_for_update_no_data_found is
-        l_pk1        test_table$tapi.pk_t := 1;
         l_unique_col test_table$tapi.varchar2_t_t := '1';
-        l_tapi       test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk         => l_pk1,
+        l_tapi       test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk         => 1,
                                                                                            varchar2_t => l_unique_col));
     begin
         l_tapi := test_table$tapi.sel_lock_unique_col(p_varchar2_t => 'aaa');
@@ -264,7 +254,7 @@ create or replace package body test_tapi is
         l_cur    test_table$tapi.strong_ref_cursor;
     begin
         l_rows := test_table$tapi.rows_tab(test_table$tapi.rt_defaults(pk => l_pk1),
-                                           test_table$tapi.rt_defaults(pk => '2'));
+                                           test_table$tapi.rt_defaults(pk => 2));
         l_rows := test_table$tapi.ins_rows(l_rows, l_errors);
     
         open l_cur for
@@ -276,35 +266,47 @@ create or replace package body test_tapi is
         ut.expect(l_rows.count).to_equal(1);
     end;
 
-    procedure test_pipe_rows is
-        l_pk1    test_table$tapi.pk_t := 1;
-        l_row    test_table$tapi.rt;
-        l_rows   test_table$tapi.rows_tab;
-        l_cur    test_table$tapi.strong_ref_cursor;
+    procedure test_pipe_tf is
+        l_pk1  test_table$tapi.pk_t := 1;
+        l_row  test_table$tapi.rt;
+        l_rows test_table$tapi.rows_tab;
+        l_cur_1  test_table$tapi.strong_ref_cursor;
+        l_cur_2  test_table$tapi.strong_ref_cursor;
     begin
         l_rows := test_table$tapi.rows_tab(test_table$tapi.rt_defaults(pk => l_pk1),
-                                           test_table$tapi.rt_defaults(pk => '2'));
+                                           test_table$tapi.rt_defaults(pk => 2),
+                                           test_table$tapi.rt_defaults(pk => 3));
         test_table$tapi.ins_rows(l_rows);
     
-        open l_cur for
+        open l_cur_1 for
             select *
               from test_table
-             where pk = l_pk1;
+             order by pk;
         select *
           into l_row
-          from table(test_table$tapi.pipe_rows(l_cur));
-    
+          from table(test_table$tapi.pipe_tf(l_cur_1))
+         fetch first 1 rows only;
+        ut.expect(l_row.pk).to_equal(l_pk1);
+
+        open l_cur_2 for
+            select *
+              from test_table
+             order by pk
+             fetch first 1 rows only;
+        select *
+          into l_row
+          from table(test_table$tapi.pipe_tf(l_cur_2));
         ut.expect(l_row.pk).to_equal(l_pk1);
     end;
 
-    procedure test_pipe_rows_cursor_closed is
-        l_pk1    test_table$tapi.pk_t := 1;
-        l_count  number;
-        l_rows   test_table$tapi.rows_tab;
-        l_cur    test_table$tapi.strong_ref_cursor;
+    procedure test_pipe_tf_cursor_closed is
+        l_pk1   test_table$tapi.pk_t := 1;
+        l_count number;
+        l_rows  test_table$tapi.rows_tab;
+        l_cur   test_table$tapi.strong_ref_cursor;
     begin
         l_rows := test_table$tapi.rows_tab(test_table$tapi.rt_defaults(pk => l_pk1),
-                                           test_table$tapi.rt_defaults(pk => '2'));
+                                           test_table$tapi.rt_defaults(pk => 2));
         test_table$tapi.ins_rows(l_rows);
     
         open l_cur for
@@ -314,34 +316,33 @@ create or replace package body test_tapi is
         close l_cur;
         select count(*)
           into l_count
-          from table(test_table$tapi.pipe_rows(l_cur));
+          from table(test_table$tapi.pipe_tf(l_cur));
     
         ut.expect(l_count).to_equal(0);
     end;
 
     procedure test_non_unique_index_cursors is
-        l_pk1       test_table$tapi.pk_t := 1;
         l_idx_value test_table$tapi.number_t_t := 123456;
         l_rows      test_table$tapi.rows_tab;
         l_errors    test_table$tapi.rows_tab;
         l_rec       test_table$tapi.rt;
         l_found     boolean;
     begin
-        l_rows := test_table$tapi.rows_tab(test_table$tapi.rt_defaults(pk => l_pk1, number_t => l_idx_value),
-                                           test_table$tapi.rt_defaults(pk => '2'));
+        l_rows := test_table$tapi.rows_tab(test_table$tapi.rt_defaults(pk => 1, number_t => l_idx_value),
+                                           test_table$tapi.rt_defaults(pk => 2));
         l_rows := test_table$tapi.ins_rows(l_rows, l_errors);
-        open test_table$tapi.cur_idx_col_idx(l_idx_value);
-        fetch test_table$tapi.cur_idx_col_idx
+        open test_table$tapi.cur_idx_col(l_idx_value);
+        fetch test_table$tapi.cur_idx_col
             into l_rec;
-        l_found := test_table$tapi.cur_idx_col_idx%found;
-        close test_table$tapi.cur_idx_col_idx;
+        l_found := test_table$tapi.cur_idx_col%found;
+        close test_table$tapi.cur_idx_col;
         ut.expect(l_found).to_be_true();
     
-        open test_table$tapi.cur_idx_col_idx_lock(l_idx_value);
-        fetch test_table$tapi.cur_idx_col_idx_lock
+        open test_table$tapi.cur_idx_col_lock(l_idx_value);
+        fetch test_table$tapi.cur_idx_col_lock
             into l_rec;
-        l_found := test_table$tapi.cur_idx_col_idx_lock%found;
-        close test_table$tapi.cur_idx_col_idx_lock;
+        l_found := test_table$tapi.cur_idx_col_lock%found;
+        close test_table$tapi.cur_idx_col_lock;
         ut.expect(l_found).to_be_true();
     end;
 
@@ -359,16 +360,16 @@ create or replace package body test_tapi is
     end;
 
     procedure test_update_dup_val_on_index is
-        l_tapi   test_table$tapi.rt;
+        l_tapi test_table$tapi.rt;
     begin
-        l_tapi          := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => 1, varchar2_t => 'unique'));
-        l_tapi          := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => 2, varchar2_t => 'non_unique'));
+        l_tapi            := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => 1, varchar2_t => 'unique'));
+        l_tapi            := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => 2, varchar2_t => 'non_unique'));
         l_tapi.varchar2_t := 'unique';
         test_table$tapi.upd(l_tapi);
     end;
 
     procedure test_update_not_null is
-        l_tapi   test_table$tapi.rt;
+        l_tapi test_table$tapi.rt;
     begin
         l_tapi          := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => 1));
         l_tapi.number_t := null;
@@ -376,8 +377,8 @@ create or replace package body test_tapi is
     end;
 
     procedure test_update_rows is
-        l_row_1  test_table$tapi.rt := test_table$tapi.rt_defaults(pk => '1');
-        l_row_2  test_table$tapi.rt := test_table$tapi.rt_defaults(pk => '2');
+        l_row_1  test_table$tapi.rt := test_table$tapi.rt_defaults(pk => 1);
+        l_row_2  test_table$tapi.rt := test_table$tapi.rt_defaults(pk => 2);
         l_number number := 999999999;
         l_rows   test_table$tapi.rows_tab;
         l_cur    test_table$tapi.strong_ref_cursor;
@@ -399,8 +400,8 @@ create or replace package body test_tapi is
     end;
 
     procedure test_update_rows_exception is
-        l_row_1 test_table$tapi.rt := test_table$tapi.rt_defaults(pk => '1');
-        l_row_2 test_table$tapi.rt := test_table$tapi.rt_defaults(pk => '2');
+        l_row_1 test_table$tapi.rt := test_table$tapi.rt_defaults(pk => 1);
+        l_row_2 test_table$tapi.rt := test_table$tapi.rt_defaults(pk => 2);
         l_rows  test_table$tapi.rows_tab := test_table$tapi.rows_tab(l_row_1, l_row_2);
         l_cur   test_table$tapi.strong_ref_cursor;
     begin
@@ -419,10 +420,10 @@ create or replace package body test_tapi is
         l_number number := 999999999;
         l_tapi   test_table$tapi.rt;
     begin
-        ut.expect(test_table$tapi.counts()).to_equal(0);
+        ut.expect(test_table$tapi.cnt()).to_equal(0);
         test_table$tapi.upsert(test_table$tapi.rt_defaults(pk => l_pk1));
     
-        ut.expect(test_table$tapi.counts()).to_equal(1);
+        ut.expect(test_table$tapi.cnt()).to_equal(1);
     
         test_table$tapi.upsert(test_table$tapi.rt_defaults(pk => l_pk1, number_t => l_number));
     
@@ -435,10 +436,10 @@ create or replace package body test_tapi is
         l_tapi test_table$tapi.rt;
     begin
         l_tapi := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => l_pk1));
-        ut.expect(test_table$tapi.counts(p_pk => l_pk1)).to_equal(1);
+        ut.expect(test_table$tapi.cnt(p_pk => l_pk1)).to_equal(1);
     
         test_table$tapi.del(l_tapi);
-        ut.expect(test_table$tapi.counts(p_pk => l_pk1)).to_equal(0);
+        ut.expect(test_table$tapi.cnt(p_pk => l_pk1)).to_equal(0);
     end;
 
     procedure test_delete_unique_col is
@@ -447,10 +448,10 @@ create or replace package body test_tapi is
         l_tapi       test_table$tapi.rt;
     begin
         l_tapi := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => l_pk1, varchar2_t => l_unique_col));
-        ut.expect(test_table$tapi.counts_unique_col(p_varchar2_t => l_unique_col)).to_equal(1);
+        ut.expect(test_table$tapi.cnt_unique_col(p_varchar2_t => l_unique_col)).to_equal(1);
     
         test_table$tapi.del_unique_col(p_varchar2_t => l_unique_col);
-        ut.expect(test_table$tapi.counts_unique_col(p_varchar2_t => l_unique_col)).to_equal(0);
+        ut.expect(test_table$tapi.cnt_unique_col(p_varchar2_t => l_unique_col)).to_equal(0);
     end;
 
     procedure test_delete_no_data_found is
@@ -463,6 +464,15 @@ create or replace package body test_tapi is
         l_unique_col test_table$tapi.varchar2_t_t := '1';
     begin
         test_table$tapi.del_unique_col(p_varchar2_t => l_unique_col);
+    end;
+
+    procedure test_delete_rows is
+        l_row_1  test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => 1));
+        l_row_2  test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => 2));
+    begin
+        test_table$tapi.del_rows(test_table$tapi.rows_tab(l_row_1, l_row_2));
+    
+        ut.expect(test_table$tapi.cnt()).to_equal(0);
     end;
 
     procedure test_audit_insert is
@@ -563,8 +573,7 @@ create or replace package body test_tapi is
     end;
 
     procedure test_checksum is
-        l_pk1              test_table$tapi.pk_t := 1;
-        l_tapi             test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => l_pk1));
+        l_tapi             test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => 1));
         l_checksum         test_table$tapi.checksum_t;
         l_checksum_changed test_table$tapi.checksum_t;
     begin
@@ -576,12 +585,25 @@ create or replace package body test_tapi is
         ut.expect(l_checksum).not_to_equal(l_checksum_changed);
     end;
 
+    procedure test_strip_checksum is
+        l_pk1              test_table$tapi.pk_t := 1;
+        l_tapi             test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => l_pk1));
+        l_checksum         test_table$tapi.rt_checksum := test_table$tapi.sel_opt(p_pk => l_pk1);
+        l_striped_checksum test_table$tapi.rt;
+        l_list             json_key_list;
+    begin
+        l_striped_checksum := test_table$tapi.strip_checksum(l_checksum);
+    
+        l_list := test_table$tapi.diff(l_tapi, l_striped_checksum).get_keys;
+        ut.expect(l_list.count).to_equal(0);
+    end;
+
     procedure test_select_opt is
         l_pk1        test_table$tapi.pk_t := 1;
         l_unique_col test_table$tapi.varchar2_t_t := '1';
         l_tapi       test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk         => l_pk1,
                                                                                            varchar2_t => l_unique_col));
-        l_tapi_opt   test_table$tapi.rt_opt;
+        l_tapi_opt   test_table$tapi.rt_checksum;
     begin
         l_tapi_opt := test_table$tapi.sel_opt(p_pk => l_pk1);
         ut.expect(l_tapi_opt.pk).to_equal(l_pk1);
@@ -594,7 +616,7 @@ create or replace package body test_tapi is
         l_pk1      test_table$tapi.pk_t := 1;
         l_number   number := 999999999;
         l_tapi     test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => l_pk1));
-        l_tapi_opt test_table$tapi.rt_opt := test_table$tapi.sel_opt(p_pk => l_pk1);
+        l_tapi_opt test_table$tapi.rt_checksum := test_table$tapi.sel_opt(p_pk => l_pk1);
     begin
         l_tapi_opt.number_t := l_number;
         test_table$tapi.upd_opt(l_tapi_opt);
@@ -607,7 +629,7 @@ create or replace package body test_tapi is
         l_pk1      test_table$tapi.pk_t := 1;
         l_number   number := 999999999;
         l_tapi     test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => l_pk1));
-        l_tapi_opt test_table$tapi.rt_opt := test_table$tapi.sel_opt(p_pk => l_pk1);
+        l_tapi_opt test_table$tapi.rt_checksum := test_table$tapi.sel_opt(p_pk => l_pk1);
     begin
         test_table$tapi.del(l_tapi_opt.pk);
         test_table$tapi.upd_opt(l_tapi_opt);
@@ -617,7 +639,7 @@ create or replace package body test_tapi is
         l_pk1      test_table$tapi.pk_t := 1;
         l_number   number := 999999999;
         l_tapi     test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => l_pk1));
-        l_tapi_opt test_table$tapi.rt_opt := test_table$tapi.sel_opt(p_pk => l_pk1);
+        l_tapi_opt test_table$tapi.rt_checksum := test_table$tapi.sel_opt(p_pk => l_pk1);
     begin
         l_tapi.number_t := '111111111';
         test_table$tapi.upd(l_tapi);
@@ -628,17 +650,15 @@ create or replace package body test_tapi is
 
     procedure test_to_json is
         l_pk1  test_table$tapi.pk_t := 1;
-        l_tapi test_table$tapi.rt := test_table$tapi.rt_defaults(pk => l_pk1);
         l_json json_object_t;
     begin
-        l_json := test_table$tapi.json_obj(l_tapi);
+        l_json := test_table$tapi.json_obj(test_table$tapi.rt_defaults(pk => l_pk1));
     
         ut.expect(l_json.get_number('pk')).to_equal(l_pk1);
     end;
 
     procedure test_of_json is
-        l_pk1    test_table$tapi.pk_t := 1;
-        l_tapi   test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => l_pk1));
+        l_tapi   test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => 1));
         l_json_1 json_object_t := test_table$tapi.json_obj(l_tapi);
         l_json_2 json_object_t;
     begin
@@ -652,16 +672,15 @@ create or replace package body test_tapi is
         l_rows       test_table$tapi.rows_tab;
         l_json_array json_array_t;
     begin
-        l_rows       := test_table$tapi.rows_tab(test_table$tapi.rt_defaults(pk => '1'),
-                                                 test_table$tapi.rt_defaults(pk => '2'));
+        l_rows       := test_table$tapi.rows_tab(test_table$tapi.rt_defaults(pk => 1),
+                                                 test_table$tapi.rt_defaults(pk => 2));
         l_json_array := test_table$tapi.json_arr(l_rows);
     
         ut.expect(l_json_array.get_size()).to_equal(2);
     end;
 
     procedure test_diff is
-        l_pk1      test_table$tapi.pk_t := 1;
-        l_tapi_1   test_table$tapi.rt := test_table$tapi.rt_defaults(pk => l_pk1);
+        l_tapi_1   test_table$tapi.rt := test_table$tapi.rt_defaults(pk => 1);
         l_tapi_2   test_table$tapi.rt := l_tapi_1;
         l_json     json_object_t;
         l_number_1 number := 111111111;
@@ -677,8 +696,7 @@ create or replace package body test_tapi is
     end;
 
     procedure test_diff_equals is
-        l_pk1  test_table$tapi.pk_t := 1;
-        l_rec  test_table$tapi.rt := test_table$tapi.rt_defaults(pk => l_pk1);
+        l_rec  test_table$tapi.rt := test_table$tapi.rt_defaults(pk => 1);
         l_json json_object_t;
         l_list json_key_list;
     begin
@@ -692,10 +710,8 @@ create or replace package body test_tapi is
     end;
 
     procedure test_diff_delete is
-        l_pk1  test_table$tapi.pk_t := 1;
-        l_rec  test_table$tapi.rt := test_table$tapi.rt_defaults(pk => l_pk1);
+        l_rec  test_table$tapi.rt := test_table$tapi.rt_defaults(pk => 1);
         l_json json_object_t;
-        l_list json_key_list;
     begin
         l_json := test_table$tapi.diff(l_rec, test_table$tapi.rt());
         ut.expect(l_json.get_string('mode')).to_equal('delete');
@@ -703,10 +719,8 @@ create or replace package body test_tapi is
     end;
 
     procedure test_diff_insert is
-        l_pk1  test_table$tapi.pk_t := 1;
-        l_rec  test_table$tapi.rt := test_table$tapi.rt_defaults(pk => l_pk1);
+        l_rec  test_table$tapi.rt := test_table$tapi.rt_defaults(pk => 1);
         l_json json_object_t;
-        l_list json_key_list;
     begin
         l_json := test_table$tapi.diff(test_table$tapi.rt(), l_rec);
         ut.expect(l_json.get_string('mode')).to_equal('insert');
@@ -722,7 +736,7 @@ create or replace package body test_tapi is
         l_diff := test_table$tapi.diff(test_table$tapi.rt(), l_rec);
         test_table$tapi.undo(l_diff);
     
-        l_exists := test_table$tapi.exist(p_pk => l_pk1);
+        l_exists := test_table$tapi.exst(p_pk => l_pk1);
         ut.expect(l_exists).to_be_false();
     end;
 
@@ -734,12 +748,12 @@ create or replace package body test_tapi is
         l_diff   json_object_t;
     begin
         test_table$tapi.del(l_pk1);
-        l_exists := test_table$tapi.exists_sel(p_pk => l_pk1, p_rec => l_tapi_2);
+        l_exists := test_table$tapi.exst_sel(p_pk => l_pk1, p_rec => l_tapi_2);
         ut.expect(l_exists).to_be_false();
     
         l_diff := test_table$tapi.diff(l_tapi_1, l_tapi_2);
         test_table$tapi.undo(l_diff);
-        l_exists := test_table$tapi.exists_sel(p_pk => l_pk1, p_rec => l_tapi_2);
+        l_exists := test_table$tapi.exst_sel(p_pk => l_pk1, p_rec => l_tapi_2);
         ut.expect(l_exists).to_be_true();
     end;
 
@@ -772,10 +786,10 @@ create or replace package body test_tapi is
     begin
         l_diff_insert := test_table$tapi.diff(test_table$tapi.rt(), l_rec);
         test_table$tapi.undo(l_diff_insert);
-        ut.expect(test_table$tapi.exist(p_pk => l_pk1)).to_be_false();
+        ut.expect(test_table$tapi.exst(p_pk => l_pk1)).to_be_false();
     
         test_table$tapi.redo(l_diff_insert);
-        ut.expect(test_table$tapi.exist(p_pk => l_pk1)).to_be_true();
+        ut.expect(test_table$tapi.exst(p_pk => l_pk1)).to_be_true();
     end;
 
     procedure test_redo_delete is
@@ -787,12 +801,11 @@ create or replace package body test_tapi is
     
         test_table$tapi.redo(l_diff);
     
-        ut.expect(test_table$tapi.exist(p_pk => l_pk1)).to_be_false();
+        ut.expect(test_table$tapi.exst(p_pk => l_pk1)).to_be_false();
     end;
 
     procedure test_redo_update is
-        l_pk1     test_table$tapi.pk_t := 1;
-        l_rec     test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => l_pk1));
+        l_rec     test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => 1));
         l_rec_upd test_table$tapi.rt := l_rec;
         l_diff    json_object_t;
     begin

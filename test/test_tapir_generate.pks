@@ -45,6 +45,11 @@ create or replace package test_tapir_generate is
     procedure test_tapi_compile_row_version;
 
     --%test
+    --%throws(-20000)
+    --%rollback(manual)
+    procedure test_tapi_compile_row_version_col_not_in_table;
+
+    --%test
     --%rollback(manual)
     procedure test_tapi_compile_double_quoted_names;
 
@@ -62,6 +67,10 @@ create or replace package test_tapir_generate is
 
     --%test
     --%rollback(manual)
+    procedure test_tapi_compile_column_expression;
+
+    --%test
+    --%rollback(manual)
     procedure test_tapi_source_no_boolean_pseudo_type;
 
     --%test
@@ -71,6 +80,10 @@ create or replace package test_tapir_generate is
     --%test
     --%rollback(manual)
     procedure test_tapi_compile_audit_ignore_when_comparing;
+
+    --%test
+    --%rollback(manual)
+    procedure test_tapi_compile_audit_record_user_override;
 
     --%test
     --%rollback(manual)
@@ -91,6 +104,10 @@ create or replace package test_tapir_generate is
     --%test
     --%rollback(manual)
     procedure test_tapi_compile_no_logging_diff_json;
+
+    --%test
+    --%rollback(manual)
+    procedure test_tapi_compile_no_print;
 
     --%test
     --%rollback(manual)
