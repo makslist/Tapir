@@ -746,7 +746,7 @@ create or replace package body tapir is
 
     function is_create_diff return boolean is
     begin
-        return params.proc_diff is not null or (params.log_exception_procedure is not null and g_cons.count > 0);
+        return params.proc_diff is not null or(params.log_exception_procedure is not null and g_cons.count > 0);
     end;
 
     function name_proc_json_obj return varchar2 is
@@ -1279,22 +1279,25 @@ create or replace package body tapir is
         p_param_name in varchar2,
         p_without_pk in boolean default false
     ) return clob is
-        bdy               clob;
-        exc_handler       str_list := str_list();
+        bdy         clob;
+        exc_handler str_list := str_list();
     begin
         for i in 1 .. g_cons.count loop
             if (p_without_pk and g_cons(i).c_type = 'P') or g_cons(i).c_type = 'N' then
                 continue;
             end if;
             exc_handler.extend;
-            exc_handler(exc_handler.last) := 'when instr(lower(sqlerrm), ''' || lower(g_cons(i).c_name) || ''') > 0 then';
+            exc_handler(exc_handler.last) := 'when instr(lower(sqlerrm), ''' || lower(g_cons(i).c_name) ||
+                                             ''') > 0 then';
             exc_handler.extend;
             exc_handler(exc_handler.last) := tab || log_exception('sqlerrm || '': '' || ' || proc_name_pk_string || '(' ||
-                                             p_param_name || ')');
+                                                                  p_param_name || ')');
             exc_handler.extend;
             exc_handler(exc_handler.last) := tab || log_exception(params.proc_diff || '(' || params.proc_select || g_cons(i).c_suffix || '(' ||
-                                             str_join(stringf(read_cons_cols(g_cons(i).c_name), col_rec(p_param_name)), ', ') || '), ' ||
-                                             p_param_name || ')' || '.to_string');
+                                                                  str_join(stringf(read_cons_cols(g_cons(i).c_name),
+                                                                                   col_rec(p_param_name)),
+                                                                           ', ') || '), ' || p_param_name || ')' ||
+                                                                  '.to_string');
         end loop;
     
         if exc_handler.count > 0 then
@@ -2123,7 +2126,7 @@ create or replace package body tapir is
                                    errors_var || ' out nocopy ' || type_rows_tab || nlt || ') return ' || type_rows_tab;
         ret_rows   constant str := 'ret_tab';
         l_column_not_changed str_list;
-        bdy clob;
+        bdy                  clob;
     begin
         if not params.bulk_proc.generate then
             return null;
@@ -2142,14 +2145,15 @@ create or replace package body tapir is
                         ',' || nltttt || '    ');
         bdy := bdy || nlttt || ' where ' ||
                str_join(stringf(g_pk_cols, col_quote('t.') || ' = ' || col_rec(param || '(i)')), nlttt || '   and ');
-
-        l_column_not_changed := str_join(stringf(non_pk(comparables), not_equal_exp(col_quote('t.'), col_rec(param || '(i)'))),
+    
+        l_column_not_changed := str_join(stringf(non_pk(comparables),
+                                                 not_equal_exp(col_quote('t.'), col_rec(param || '(i)'))),
                                          stringf(include(g_cols, lob_types),
                                                  not_equal_exp(col_quote('t.'), col_rec(param || '(i)'), c_type_blob)));
         if l_column_not_changed.count > 0 then
             bdy := bdy || nlttt || '   and    (' || str_join(l_column_not_changed, nlttt || '        or ') || ')';
         end if;
-
+    
         bdy := bdy || nlttt || 'returning' || ' ' || str_join(stringf(g_cols, col_quote), ', ') ||
                ' bulk collect into ' || ret_rows || ';';
         if with_cloud_events then

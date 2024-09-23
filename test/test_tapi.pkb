@@ -59,8 +59,7 @@ create or replace package body test_tapi is
     procedure test_insert_rows is
         l_rows test_table$tapi.rows_tab;
     begin
-        l_rows := test_table$tapi.rows_tab(test_table$tapi.rt_defaults(pk => 1),
-                                           test_table$tapi.rt_defaults(pk => 2));
+        l_rows := test_table$tapi.rows_tab(test_table$tapi.rt_defaults(pk => 1), test_table$tapi.rt_defaults(pk => 2));
         test_table$tapi.ins_rows(l_rows);
     
         ut.expect(test_table$tapi.cnt()).to_equal(2);
@@ -267,11 +266,11 @@ create or replace package body test_tapi is
     end;
 
     procedure test_pipe_tf is
-        l_pk1  test_table$tapi.pk_t := 1;
-        l_row  test_table$tapi.rt;
-        l_rows test_table$tapi.rows_tab;
-        l_cur_1  test_table$tapi.strong_ref_cursor;
-        l_cur_2  test_table$tapi.strong_ref_cursor;
+        l_pk1   test_table$tapi.pk_t := 1;
+        l_row   test_table$tapi.rt;
+        l_rows  test_table$tapi.rows_tab;
+        l_cur_1 test_table$tapi.strong_ref_cursor;
+        l_cur_2 test_table$tapi.strong_ref_cursor;
     begin
         l_rows := test_table$tapi.rows_tab(test_table$tapi.rt_defaults(pk => l_pk1),
                                            test_table$tapi.rt_defaults(pk => 2),
@@ -287,7 +286,7 @@ create or replace package body test_tapi is
           from table(test_table$tapi.pipe_tf(l_cur_1))
          fetch first 1 rows only;
         ut.expect(l_row.pk).to_equal(l_pk1);
-
+    
         open l_cur_2 for
             select *
               from test_table
@@ -467,12 +466,24 @@ create or replace package body test_tapi is
     end;
 
     procedure test_delete_rows is
-        l_row_1  test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => 1));
-        l_row_2  test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => 2));
+        l_row_1 test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => 1));
+        l_row_2 test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => 2));
     begin
         test_table$tapi.del_rows(test_table$tapi.rows_tab(l_row_1, l_row_2));
     
         ut.expect(test_table$tapi.cnt()).to_equal(0);
+    end;
+
+    procedure test_delete_rows_not_found is
+        l_pk    test_table$tapi.pk_t := 1;
+        l_row_1 test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => l_pk));
+        l_row_2 test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => 2));
+    begin
+        insert into test_table_fk
+            (fk)
+        values
+            (l_pk);
+        test_table$tapi.del_rows(test_table$tapi.rows_tab(l_row_1, l_row_2));
     end;
 
     procedure test_audit_insert is
@@ -648,6 +659,25 @@ create or replace package body test_tapi is
         test_table$tapi.upd_opt(l_tapi_opt);
     end;
 
+    procedure test_delete_opt is
+        l_pk1      test_table$tapi.pk_t := 1;
+        l_number   number := 999999999;
+        l_tapi     test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => l_pk1));
+        l_tapi_opt test_table$tapi.rt_checksum := test_table$tapi.sel_opt(p_pk => l_pk1);
+    begin
+        test_table$tapi.del_opt(l_tapi_opt);
+    end;
+
+    procedure test_delete_opt_not_found is
+        l_pk1      test_table$tapi.pk_t := 1;
+        l_number   number := 999999999;
+        l_tapi     test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => l_pk1));
+        l_tapi_opt test_table$tapi.rt_checksum := test_table$tapi.sel_opt(p_pk => l_pk1);
+    begin
+        test_table$tapi.del(l_tapi);
+        test_table$tapi.del_opt(l_tapi_opt);
+    end;
+
     procedure test_to_json is
         l_pk1  test_table$tapi.pk_t := 1;
         l_json json_object_t;
@@ -659,9 +689,11 @@ create or replace package body test_tapi is
 
     procedure test_of_json is
         l_tapi   test_table$tapi.rt := test_table$tapi.ins(test_table$tapi.rt_defaults(pk => 1));
-        l_json_1 json_object_t := test_table$tapi.json_obj(l_tapi);
+        l_json_1 json_object_t;
         l_json_2 json_object_t;
     begin
+        l_tapi.row_version := 1;
+        l_json_1 := test_table$tapi.json_obj(l_tapi);
         l_tapi := test_table$tapi.of_json(l_json_1);
     
         l_json_2 := test_table$tapi.json_obj(l_tapi);

@@ -129,6 +129,10 @@ create or replace package test_tapi authid definer is
     procedure test_delete_rows;
 
     --%test
+    --%throws(-24381)
+    procedure test_delete_rows_not_found;
+
+    --%test
     procedure test_audit_insert;
 
     --%test
@@ -151,7 +155,7 @@ create or replace package test_tapi authid definer is
 
     --%test
     procedure test_strip_checksum;
-    
+
     --%test
     procedure test_select_opt;
 
@@ -165,6 +169,13 @@ create or replace package test_tapi authid definer is
     --%test
     --%throws(-20000)
     procedure test_update_opt_changed;
+
+    --%test
+    procedure test_delete_opt;
+
+    --%test
+    --%throws(-20000)
+    procedure test_delete_opt_not_found;
 
     --%test
     procedure test_to_json;
