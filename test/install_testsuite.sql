@@ -90,6 +90,8 @@ create table if not exists test_table_edge_case(
 @test_tapir_generate.pkb
 /
 
+drop table if exists test_table_fk;
+/
 drop table if exists test_table;
 /
 create table if not exists test_table(
@@ -129,8 +131,6 @@ create table if not exists test_table(
 create unique index if not exists test_table_unique_col on test_table(varchar2_t)
 /
 create index if not exists test_table_col_idx on test_table(number_t)
-/
-drop table if exists test_table_fk;
 /
 create table if not exists test_table_fk(
    id    int generated always as identity,

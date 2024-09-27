@@ -815,9 +815,6 @@ create or replace package body tapir is
         bdy := bdy || nltt || 'temp  blob;';
         bdy := bdy || nltt || 'l_raw raw(32767);';
         bdy := bdy || nlt || 'begin';
-        bdy := bdy || nltt || 'if ' || p_val || ' is null or ' || p_val || ' = empty_clob() then';
-        bdy := bdy || nlttt || 'return null;';
-        bdy := bdy || nltt || 'end if;';
         bdy := bdy || nltt || 'sys.dbms_lob.createtemporary(temp, false, dbms_lob.call);';
         bdy := bdy || nltt || 'for i in 0 .. trunc((sys.dbms_lob.getlength(' || p_val || ') - 1) / c_step)';
         bdy := bdy || nltt || 'loop';
